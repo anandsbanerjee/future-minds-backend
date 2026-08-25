@@ -81,9 +81,13 @@ that module is implemented, not all at once.
 
 ## 9. Configuration
 
-- `application.yml` (base configuration).
-- `application-local.yml` (local development).
-- `application-test.yml` (test execution).
+- `application.properties` (base configuration).
+- `application-local.properties` (local development).
+- `application-test.properties` (test execution).
+- `application-prod.properties` (production).
+- Active profile is selected externally via the `SPRING_PROFILES_ACTIVE`
+  environment variable (`local`, `test`, or `prod`); it is never hard-coded
+  in `application.properties`.
 - Secrets supplied via environment variables.
 - Production configuration must never contain checked-in credentials.
 
