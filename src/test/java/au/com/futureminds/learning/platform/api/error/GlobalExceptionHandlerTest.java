@@ -33,6 +33,7 @@ class GlobalExceptionHandlerTest {
         assertThat(body).isNotNull();
         assertThat(body.getStatus()).isEqualTo(500);
         assertThat(body.getTitle()).isEqualTo("Internal Server Error");
+        assertThat(body.getProperties()).containsEntry("errorCode", ApiErrorCode.INTERNAL_ERROR.getCode());
     }
 
     @Test
@@ -50,7 +51,8 @@ class GlobalExceptionHandlerTest {
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
         ProblemDetail body = (ProblemDetail) response.getBody();
         assertThat(body).isNotNull();
-        assertThat(body.getTitle()).isEqualTo("Validation Failed");
+        assertThat(body.getTitle()).isEqualTo("Validation failed");
+        assertThat(body.getProperties()).containsEntry("errorCode", ApiErrorCode.VALIDATION_FAILED.getCode());
         assertThat(body.getProperties()).containsKey("errors");
     }
 
@@ -65,6 +67,7 @@ class GlobalExceptionHandlerTest {
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
         ProblemDetail body = (ProblemDetail) response.getBody();
         assertThat(body).isNotNull();
-        assertThat(body.getTitle()).isEqualTo("Malformed Request Body");
+        assertThat(body.getTitle()).isEqualTo("Malformed request");
+        assertThat(body.getProperties()).containsEntry("errorCode", ApiErrorCode.MALFORMED_REQUEST.getCode());
     }
 }
