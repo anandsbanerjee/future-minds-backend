@@ -19,10 +19,21 @@ public class SystemController {
     public SystemController(@Value("${spring.application.name}") String applicationName) {
         this.applicationName = applicationName;
     }
-
+    //public API
     @GetMapping("/status")
     public SystemStatusResponse status() {
         return new SystemStatusResponse("UP", applicationName);
+    }
+
+    //Checking KeyCloak IDP access-token based access only
+    @GetMapping("/protected")
+    public SystemStatusResponse statusSecure() {
+        return new SystemStatusResponse("SECURE-UP", applicationName);
+    }
+    //testing with hasRole("PARENT")
+    @GetMapping("/protected/parent")
+    public SystemStatusResponse statusSecureRole() {
+        return new SystemStatusResponse("SECURE-ROLE-UP", applicationName);
     }
 
     @PostMapping("/validation-check")
