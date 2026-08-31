@@ -5,6 +5,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -16,6 +17,12 @@ import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 import java.util.List;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
+import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
+
+import java.util.ArrayList;
+import java.util.Collection;
 
 /**
  * Assumption: no local-development CORS origin convention exists yet for the
@@ -28,7 +35,7 @@ public class SecurityConfig {
     private static final String LOCAL_MOBILE_DEV_ORIGIN = "http://localhost:8081";
 
     @Bean
-    SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+    SecurityFilterChain securityFilterChain(HttpSecurity http, KeycloakRealmRoleConverter keycloakRealmRoleConverter) throws Exception {
         http
                 .csrf(csrf -> csrf.disable())
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
@@ -38,7 +45,26 @@ public class SecurityConfig {
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers(HttpMethod.GET, ApiPaths.V1 + "/system/status").permitAll()
                         .requestMatchers(HttpMethod.GET, "/actuator/health").permitAll()
+                        .requestMatchers(HttpMethod.GET, ApiPaths.V1+"/system/protected/parent").hasRole("PARENT")
+                        .requestMatchers(HttpMethod.PUT, ApiPaths.V1 + "/parents/me").hasRole("PARENT")
                         .anyRequest().authenticated())
+                // Configure this application as an OAuth2 Resource Server.
+                // Spring Security will validate incoming Bearer JWTs using
+                // spring.security.oauth2.resourceserver.jwt.issuer-uri.
+//                .oauth2ResourceServer(oauth2 ->
+//                        oauth2.jwt(Customizer.withDefaults())
+//                )
+                //with hasRole
+                .oauth2ResourceServer(oauth2 ->
+                        oauth2.jwt(jwt ->
+                                jwt.jwtAuthenticationConverter(
+                                        jwtAuthenticationConverter(
+                                                keycloakRealmRoleConverter
+                                        )
+                                )
+                        )
+                )
+                // Missing or invalid authentication returns HTTP 401.
                 .exceptionHandling(exceptionHandling -> exceptionHandling
                         .authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)));
 
@@ -60,5 +86,39 @@ public class SecurityConfig {
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);
         return source;
+    }
+
+    @Bean
+    JwtAuthenticationConverter jwtAuthenticationConverter(
+            KeycloakRealmRoleConverter keycloakRealmRoleConverter) {
+
+        JwtGrantedAuthoritiesConverter scopeAuthoritiesConverter =
+                new JwtGrantedAuthoritiesConverter();
+
+        JwtAuthenticationConverter jwtAuthenticationConverter =
+                new JwtAuthenticationConverter();
+
+        jwtAuthenticationConverter.setJwtGrantedAuthoritiesConverter(jwt -> {
+
+            Collection<GrantedAuthority> scopeAuthorities =
+                    scopeAuthoritiesConverter.convert(jwt);
+
+            Collection<GrantedAuthority> realmRoleAuthorities =
+                    keycloakRealmRoleConverter.convert(jwt);
+
+            List<GrantedAuthority> authorities = new ArrayList<>();
+
+            if (scopeAuthorities != null) {
+                authorities.addAll(scopeAuthorities);
+            }
+
+            if (realmRoleAuthorities != null) {
+                authorities.addAll(realmRoleAuthorities);
+            }
+
+            return authorities;
+        });
+
+        return jwtAuthenticationConverter;
     }
 }
