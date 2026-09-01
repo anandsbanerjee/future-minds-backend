@@ -1,14 +1,17 @@
 package au.com.futureminds.learning.platform.api.parent;
 
 import au.com.futureminds.learning.platform.api.ApiPaths;
+import au.com.futureminds.learning.platform.persistence.parentaccount.ParentAccount;
 import au.com.futureminds.learning.platform.persistence.parentaccount.ParentAccountService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
 @RestController
 @RequestMapping(ApiPaths.V1 + "/parents")
@@ -37,5 +40,18 @@ public class ParentController {
         return result.created()
                 ? ResponseEntity.status(HttpStatus.CREATED).body(body)
                 : ResponseEntity.ok(body);
+    }
+
+    /**
+     * Read-only - looks up the account already provisioned for this JWT subject
+     * and never creates or synchronises one.
+     */
+    @GetMapping("/me")
+    public ResponseEntity<ParentAccountResponse> getMe(@AuthenticationPrincipal Jwt jwt) {
+        ParentAccount account = parentAccountService.findByExternalSubject(jwt.getSubject())
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND, "Parent account not found."));
+
+        return ResponseEntity.ok(ParentAccountResponse.from(account));
     }
 }

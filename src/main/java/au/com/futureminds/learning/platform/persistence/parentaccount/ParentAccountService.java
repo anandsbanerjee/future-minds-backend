@@ -6,6 +6,8 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Optional;
+
 @Service
 public class ParentAccountService {
 
@@ -15,6 +17,15 @@ public class ParentAccountService {
 
     public ParentAccountService(ParentAccountRepository parentAccountRepository) {
         this.parentAccountRepository = parentAccountRepository;
+    }
+
+    /**
+     * Read-only lookup of an already-provisioned account. Does not create or
+     * synchronise anything - callers get an empty Optional if the subject has
+     * never called provision(...).
+     */
+    public Optional<ParentAccount> findByExternalSubject(String externalSubject) {
+        return parentAccountRepository.findByExternalSubject(externalSubject);
     }
 
     /**

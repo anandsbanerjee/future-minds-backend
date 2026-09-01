@@ -83,4 +83,27 @@ class ParentAccountServiceTest {
         verify(parentAccountRepository).saveAndFlush(captor.capture());
         assertThat(captor.getValue().getExternalSubject()).isEqualTo(SUBJECT);
     }
+
+    @Test
+    void findByExternalSubjectReturnsTheExistingAccountWithoutWritingAnything() {
+        ParentAccount existing = new ParentAccount(SUBJECT, "parent@example.com", "Ada", "Lovelace");
+        when(parentAccountRepository.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(existing));
+
+        Optional<ParentAccount> result = parentAccountService.findByExternalSubject(SUBJECT);
+
+        assertThat(result).contains(existing);
+        verify(parentAccountRepository, never()).save(any());
+        verify(parentAccountRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void findByExternalSubjectReturnsEmptyForAnUnknownSubjectAndDoesNotCreateOne() {
+        when(parentAccountRepository.findByExternalSubject(SUBJECT)).thenReturn(Optional.empty());
+
+        Optional<ParentAccount> result = parentAccountService.findByExternalSubject(SUBJECT);
+
+        assertThat(result).isEmpty();
+        verify(parentAccountRepository, never()).save(any());
+        verify(parentAccountRepository, never()).saveAndFlush(any());
+    }
 }

@@ -2,6 +2,8 @@ package au.com.futureminds.learning.platform.api.system;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.security.oauth2.server.resource.autoconfigure.OAuth2ResourceServerAutoConfiguration;
+import org.springframework.boot.security.oauth2.server.resource.autoconfigure.web.OAuth2ResourceServerWebSecurityAutoConfiguration;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
@@ -11,7 +13,16 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@WebMvcTest(SystemController.class)
+/**
+ * Security is deliberately out of scope here - excluding the OAuth2 resource
+ * server auto-configuration keeps this a pure controller slice. Real security
+ * enforcement for these endpoints is covered by SecurityConfigIntegrationTest.
+ */
+@WebMvcTest(controllers = SystemController.class,
+        excludeAutoConfiguration = {
+                OAuth2ResourceServerAutoConfiguration.class,
+                OAuth2ResourceServerWebSecurityAutoConfiguration.class
+        })
 class SystemControllerTest {
 
     private static final String VALIDATION_CHECK_URI = "/api/v1/system/validation-check";

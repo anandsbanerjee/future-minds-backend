@@ -13,6 +13,8 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.util.Optional;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -20,6 +22,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -30,6 +33,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class ParentControllerTest {
 
     private static final String PUT_ME_URI = "/api/v1/parents/me";
+    private static final String GET_ME_URI = "/api/v1/parents/me";
     private static final String SUBJECT = "keycloak-subject-abc";
 
     @Autowired
@@ -132,5 +136,70 @@ class ParentControllerTest {
                 .andExpect(jsonPath("$.passwordHash").doesNotExist())
                 .andExpect(jsonPath("$.accessToken").doesNotExist())
                 .andExpect(jsonPath("$.refreshToken").doesNotExist());
+    }
+
+    @Test
+    void getMeUnauthenticatedRequestIsRejected() throws Exception {
+        mockMvc.perform(get(GET_ME_URI))
+                .andExpect(status().isUnauthorized());
+
+        verify(parentAccountService, never()).findByExternalSubject(any());
+        verify(parentAccountService, never()).provision(any(), any(), any(), any());
+    }
+
+    @Test
+    void getMeAuthenticatedNonParentRequestIsForbidden() throws Exception {
+        mockMvc.perform(get(GET_ME_URI).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT).claim("email", "someone@example.com"))
+                        .authorities(new SimpleGrantedAuthority("ROLE_STUDENT"))))
+                .andExpect(status().isForbidden());
+
+        verify(parentAccountService, never()).findByExternalSubject(any());
+        verify(parentAccountService, never()).provision(any(), any(), any(), any());
+    }
+
+    @Test
+    void getMeReturnsTheExistingParentAccountForTheAuthenticatedSubject() throws Exception {
+        ParentAccount existing = new ParentAccount(SUBJECT, "parent@example.com", "Ada", "Lovelace");
+        when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(existing));
+
+        mockMvc.perform(get(GET_ME_URI).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.email").value("parent@example.com"))
+                .andExpect(jsonPath("$.givenName").value("Ada"))
+                .andExpect(jsonPath("$.familyName").value("Lovelace"))
+                .andExpect(jsonPath("$.id").doesNotExist())
+                .andExpect(jsonPath("$.externalSubject").doesNotExist());
+
+        verify(parentAccountService, never()).provision(any(), any(), any(), any());
+    }
+
+    @Test
+    void getMeReturnsNotFoundWhenNoParentAccountExistsForTheAuthenticatedSubject() throws Exception {
+        when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.empty());
+
+        mockMvc.perform(get(GET_ME_URI).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT"))))
+                .andExpect(status().isNotFound());
+
+        verify(parentAccountService, never()).provision(any(), any(), any(), any());
+    }
+
+    @Test
+    void getMeDerivesIdentityOnlyFromTheJwtSubject() throws Exception {
+        ParentAccount existing = new ParentAccount(SUBJECT, "parent@example.com", "Ada", "Lovelace");
+        when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(existing));
+
+        mockMvc.perform(get(GET_ME_URI).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT"))))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<String> subjectCaptor = ArgumentCaptor.forClass(String.class);
+        verify(parentAccountService).findByExternalSubject(subjectCaptor.capture());
+        assertThat(subjectCaptor.getValue()).isEqualTo(SUBJECT);
     }
 }
