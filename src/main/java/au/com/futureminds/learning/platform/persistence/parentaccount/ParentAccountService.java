@@ -6,6 +6,8 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
 @Service
@@ -14,9 +16,12 @@ public class ParentAccountService {
     private static final Logger log = LoggerFactory.getLogger(ParentAccountService.class);
 
     private final ParentAccountRepository parentAccountRepository;
+    private final ParentProfileAuditRepository parentProfileAuditRepository;
 
-    public ParentAccountService(ParentAccountRepository parentAccountRepository) {
+    public ParentAccountService(ParentAccountRepository parentAccountRepository,
+                                 ParentProfileAuditRepository parentProfileAuditRepository) {
         this.parentAccountRepository = parentAccountRepository;
+        this.parentProfileAuditRepository = parentProfileAuditRepository;
     }
 
     /**
@@ -33,16 +38,57 @@ public class ParentAccountService {
      * A unique constraint on external_subject is the authority of last resort:
      * on a concurrent first call from the same subject, the losing transaction
      * falls back to updating the row the winner just inserted, rather than failing.
+     *
+     * givenName/familyName/marketingOptIn are only seeded on first creation -
+     * once a parent account exists it is application-owned for those fields, so
+     * repeat provisioning must not clobber a parent's own edits. Only email
+     * remains Keycloak-owned and is re-synced on every call.
      */
     @Transactional
     public ProvisionResult provision(String externalSubject, String email, String givenName, String familyName) {
         return parentAccountRepository.findByExternalSubject(externalSubject)
-                .map(existing -> syncExisting(existing, email, givenName, familyName))
+                .map(existing -> syncIdentityProviderEmail(existing, email))
                 .orElseGet(() -> createOrRecoverFromRace(externalSubject, email, givenName, familyName));
     }
 
-    private ProvisionResult syncExisting(ParentAccount account, String email, String givenName, String familyName) {
-        account.syncProfile(email, givenName, familyName);
+    /**
+     * Application-owned profile edit, entirely separate from identity-provider
+     * provisioning/synchronisation. Never creates an account. Only fields that
+     * actually change are persisted and audited; omitted (null) fields are left
+     * untouched.
+     */
+    @Transactional
+    public Optional<ParentAccount> updateProfile(String externalSubject, String givenName, String familyName, Boolean marketingOptIn) {
+        return parentAccountRepository.findByExternalSubject(externalSubject)
+                .map(account -> applyProfileUpdate(account, givenName, familyName, marketingOptIn));
+    }
+
+    private ParentAccount applyProfileUpdate(ParentAccount account, String givenName, String familyName, Boolean marketingOptIn) {
+        List<ParentProfileAudit> auditEvents = new ArrayList<>();
+
+        if (givenName != null && account.updateGivenName(givenName)) {
+            auditEvents.add(new ParentProfileAudit(account.getId(), ParentProfileChangeType.GIVEN_NAME_UPDATED));
+        }
+
+        if (familyName != null && account.updateFamilyName(familyName)) {
+            auditEvents.add(new ParentProfileAudit(account.getId(), ParentProfileChangeType.FAMILY_NAME_UPDATED));
+        }
+
+        if (marketingOptIn != null && account.updateMarketingOptIn(marketingOptIn)) {
+            auditEvents.add(new ParentProfileAudit(account.getId(), marketingOptIn
+                    ? ParentProfileChangeType.MARKETING_PREFERENCE_ENABLED
+                    : ParentProfileChangeType.MARKETING_PREFERENCE_DISABLED));
+        }
+
+        if (!auditEvents.isEmpty()) {
+            parentProfileAuditRepository.saveAll(auditEvents);
+        }
+
+        return account;
+    }
+
+    private ProvisionResult syncIdentityProviderEmail(ParentAccount account, String email) {
+        account.syncEmailFromIdentityProvider(email);
         return new ProvisionResult(account, false);
     }
 
@@ -56,7 +102,7 @@ public class ParentAccountService {
             ParentAccount existing = parentAccountRepository.findByExternalSubject(externalSubject)
                     .orElseThrow(() -> raceLost);
             log.debug("Lost concurrent provisioning race for subject={}, syncing existing row instead", externalSubject);
-            return syncExisting(existing, email, givenName, familyName);
+            return syncIdentityProviderEmail(existing, email);
         }
     }
 
