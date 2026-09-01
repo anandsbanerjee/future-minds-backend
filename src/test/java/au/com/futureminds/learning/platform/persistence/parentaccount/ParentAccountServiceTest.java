@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DataIntegrityViolationException;
 
+import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -17,9 +18,13 @@ import static org.mockito.Mockito.when;
 class ParentAccountServiceTest {
 
     private final ParentAccountRepository parentAccountRepository = mock(ParentAccountRepository.class);
-    private final ParentAccountService parentAccountService = new ParentAccountService(parentAccountRepository);
+    private final ParentProfileAuditRepository parentProfileAuditRepository = mock(ParentProfileAuditRepository.class);
+    private final ParentAccountService parentAccountService =
+            new ParentAccountService(parentAccountRepository, parentProfileAuditRepository);
 
     private static final String SUBJECT = "keycloak-subject-123";
+
+    // --- provisioning ---
 
     @Test
     void firstCallCreatesExactlyOneParentAccount() {
@@ -32,23 +37,37 @@ class ParentAccountServiceTest {
 
         assertThat(result.created()).isTrue();
         assertThat(result.parentAccount()).isSameAs(saved);
+        assertThat(saved.isMarketingOptIn()).isFalse();
         verify(parentAccountRepository, times(1)).saveAndFlush(any(ParentAccount.class));
     }
 
     @Test
-    void repeatedCallForSameSubjectIsIdempotentAndUpdatesProfile() {
+    void repeatedCallForSameSubjectSynchronisesEmailButPreservesLocallyEditedNames() {
         ParentAccount existing = new ParentAccount(SUBJECT, "old@example.com", "Old", "Name");
         when(parentAccountRepository.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(existing));
 
         ParentAccountService.ProvisionResult result =
-                parentAccountService.provision(SUBJECT, "new@example.com", "New", "Name");
+                parentAccountService.provision(SUBJECT, "new@example.com", "New", "Name-From-Idp");
 
         assertThat(result.created()).isFalse();
         assertThat(result.parentAccount()).isSameAs(existing);
         assertThat(existing.getEmail()).isEqualTo("new@example.com");
-        assertThat(existing.getGivenName()).isEqualTo("New");
+        assertThat(existing.getGivenName()).isEqualTo("Old");
+        assertThat(existing.getFamilyName()).isEqualTo("Name");
         verify(parentAccountRepository, never()).saveAndFlush(any());
         verify(parentAccountRepository, never()).save(any());
+        verify(parentProfileAuditRepository, never()).saveAll(any());
+    }
+
+    @Test
+    void repeatedCallDoesNotOverwriteLocallyEditedMarketingOptIn() {
+        ParentAccount existing = new ParentAccount(SUBJECT, "old@example.com", "Old", "Name");
+        existing.updateMarketingOptIn(true);
+        when(parentAccountRepository.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(existing));
+
+        parentAccountService.provision(SUBJECT, "new@example.com", "New", "New");
+
+        assertThat(existing.isMarketingOptIn()).isTrue();
     }
 
     @Test
@@ -105,5 +124,111 @@ class ParentAccountServiceTest {
         assertThat(result).isEmpty();
         verify(parentAccountRepository, never()).save(any());
         verify(parentAccountRepository, never()).saveAndFlush(any());
+    }
+
+    // --- profile update ---
+
+    @Test
+    void updateProfileChangesGivenNameAndRecordsAuditEvent() {
+        ParentAccount existing = new ParentAccount(SUBJECT, "parent@example.com", "Old", "Name");
+        when(parentAccountRepository.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(existing));
+
+        Optional<ParentAccount> result = parentAccountService.updateProfile(SUBJECT, "New", null, null);
+
+        assertThat(result).isPresent();
+        assertThat(result.get().getGivenName()).isEqualTo("New");
+        assertThat(result.get().getFamilyName()).isEqualTo("Name");
+
+        List<ParentProfileAudit> audited = captureAuditedEvents();
+        assertThat(audited).hasSize(1);
+        assertThat(audited.get(0).getChangeType()).isEqualTo(ParentProfileChangeType.GIVEN_NAME_UPDATED);
+    }
+
+    @Test
+    void updateProfileChangesFamilyNameAndRecordsAuditEvent() {
+        ParentAccount existing = new ParentAccount(SUBJECT, "parent@example.com", "Old", "Name");
+        when(parentAccountRepository.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(existing));
+
+        parentAccountService.updateProfile(SUBJECT, null, "NewFamily", null);
+
+        List<ParentProfileAudit> audited = captureAuditedEvents();
+        assertThat(audited).hasSize(1);
+        assertThat(audited.get(0).getChangeType()).isEqualTo(ParentProfileChangeType.FAMILY_NAME_UPDATED);
+    }
+
+    @Test
+    void updateProfileEnablingMarketingOptInRecordsEnabledAuditEvent() {
+        ParentAccount existing = new ParentAccount(SUBJECT, "parent@example.com", "Old", "Name");
+        when(parentAccountRepository.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(existing));
+
+        parentAccountService.updateProfile(SUBJECT, null, null, true);
+
+        assertThat(existing.isMarketingOptIn()).isTrue();
+        List<ParentProfileAudit> audited = captureAuditedEvents();
+        assertThat(audited).hasSize(1);
+        assertThat(audited.get(0).getChangeType()).isEqualTo(ParentProfileChangeType.MARKETING_PREFERENCE_ENABLED);
+    }
+
+    @Test
+    void updateProfileDisablingMarketingOptInRecordsDisabledAuditEvent() {
+        ParentAccount existing = new ParentAccount(SUBJECT, "parent@example.com", "Old", "Name");
+        existing.updateMarketingOptIn(true);
+        when(parentAccountRepository.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(existing));
+
+        parentAccountService.updateProfile(SUBJECT, null, null, false);
+
+        assertThat(existing.isMarketingOptIn()).isFalse();
+        List<ParentProfileAudit> audited = captureAuditedEvents();
+        assertThat(audited).hasSize(1);
+        assertThat(audited.get(0).getChangeType()).isEqualTo(ParentProfileChangeType.MARKETING_PREFERENCE_DISABLED);
+    }
+
+    @Test
+    void updateProfileWithNoActualValueChangeRecordsNoAuditEvent() {
+        ParentAccount existing = new ParentAccount(SUBJECT, "parent@example.com", "Old", "Name");
+        when(parentAccountRepository.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(existing));
+
+        parentAccountService.updateProfile(SUBJECT, "Old", "Name", false);
+
+        verify(parentProfileAuditRepository, never()).saveAll(any());
+    }
+
+    @Test
+    void updateProfileLeavesOmittedFieldsUnchanged() {
+        ParentAccount existing = new ParentAccount(SUBJECT, "parent@example.com", "Old", "Name");
+        existing.updateMarketingOptIn(true);
+        when(parentAccountRepository.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(existing));
+
+        Optional<ParentAccount> result = parentAccountService.updateProfile(SUBJECT, "New", null, null);
+
+        assertThat(result.get().getFamilyName()).isEqualTo("Name");
+        assertThat(result.get().isMarketingOptIn()).isTrue();
+    }
+
+    @Test
+    void updateProfileReturnsEmptyWhenNoAccountExistsForSubject() {
+        when(parentAccountRepository.findByExternalSubject(SUBJECT)).thenReturn(Optional.empty());
+
+        Optional<ParentAccount> result = parentAccountService.updateProfile(SUBJECT, "New", null, null);
+
+        assertThat(result).isEmpty();
+        verify(parentProfileAuditRepository, never()).saveAll(any());
+    }
+
+    @Test
+    void updateProfileNeverInvokesProvisioningCreateLogic() {
+        when(parentAccountRepository.findByExternalSubject(SUBJECT)).thenReturn(Optional.empty());
+
+        parentAccountService.updateProfile(SUBJECT, "New", null, null);
+
+        verify(parentAccountRepository, never()).saveAndFlush(any());
+        verify(parentAccountRepository, never()).save(any());
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<ParentProfileAudit> captureAuditedEvents() {
+        ArgumentCaptor<List<ParentProfileAudit>> captor = ArgumentCaptor.forClass(List.class);
+        verify(parentProfileAuditRepository).saveAll(captor.capture());
+        return captor.getValue();
     }
 }

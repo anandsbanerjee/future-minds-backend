@@ -18,11 +18,13 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -34,6 +36,7 @@ class ParentControllerTest {
 
     private static final String PUT_ME_URI = "/api/v1/parents/me";
     private static final String GET_ME_URI = "/api/v1/parents/me";
+    private static final String PATCH_ME_URI = "/api/v1/parents/me";
     private static final String SUBJECT = "keycloak-subject-abc";
 
     @Autowired
@@ -201,5 +204,278 @@ class ParentControllerTest {
         ArgumentCaptor<String> subjectCaptor = ArgumentCaptor.forClass(String.class);
         verify(parentAccountService).findByExternalSubject(subjectCaptor.capture());
         assertThat(subjectCaptor.getValue()).isEqualTo(SUBJECT);
+    }
+
+    // --- PATCH /me: security ---
+
+    @Test
+    void patchMeUnauthenticatedRequestIsRejected() throws Exception {
+        mockMvc.perform(patch(PATCH_ME_URI)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isUnauthorized());
+
+        verify(parentAccountService, never()).updateProfile(any(), any(), any(), any());
+    }
+
+    @Test
+    void patchMeAuthenticatedNonParentRequestIsForbidden() throws Exception {
+        mockMvc.perform(patch(PATCH_ME_URI).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_STUDENT")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isForbidden());
+
+        verify(parentAccountService, never()).updateProfile(any(), any(), any(), any());
+    }
+
+    // --- PATCH /me: identity ---
+
+    @Test
+    void patchMeDerivesTargetAccountOnlyFromTheJwtSubject() throws Exception {
+        ParentAccount updated = new ParentAccount(SUBJECT, "parent@example.com", "New", "Name");
+        when(parentAccountService.updateProfile(eq(SUBJECT), eq("New"), any(), any()))
+                .thenReturn(Optional.of(updated));
+
+        mockMvc.perform(patch(PATCH_ME_URI).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "givenName": "New" }
+                                """))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<String> subjectCaptor = ArgumentCaptor.forClass(String.class);
+        verify(parentAccountService).updateProfile(subjectCaptor.capture(), eq("New"), any(), any());
+        assertThat(subjectCaptor.getValue()).isEqualTo(SUBJECT);
+    }
+
+    @Test
+    void patchMeRequestCannotChangeExternalSubjectRolesOrInternalId() throws Exception {
+        ParentAccount updated = new ParentAccount(SUBJECT, "real-owner@example.com", "New", "Name");
+        when(parentAccountService.updateProfile(eq(SUBJECT), eq("New"), any(), any()))
+                .thenReturn(Optional.of(updated));
+
+        mockMvc.perform(patch(PATCH_ME_URI).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "givenName": "New",
+                                  "id": 999,
+                                  "externalSubject": "someone-elses-subject",
+                                  "roles": ["ADMIN"]
+                                }
+                                """))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<String> subjectCaptor = ArgumentCaptor.forClass(String.class);
+        verify(parentAccountService).updateProfile(subjectCaptor.capture(), eq("New"), any(), any());
+        assertThat(subjectCaptor.getValue()).isEqualTo(SUBJECT);
+    }
+
+    @Test
+    void patchMeRequestCannotDirectlyChangeEmail() throws Exception {
+        ParentAccount updated = new ParentAccount(SUBJECT, "real-owner@example.com", "New", "Name");
+        when(parentAccountService.updateProfile(eq(SUBJECT), eq("New"), any(), any()))
+                .thenReturn(Optional.of(updated));
+
+        mockMvc.perform(patch(PATCH_ME_URI).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "givenName": "New",
+                                  "email": "attacker@example.com"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.email").value("real-owner@example.com"));
+
+        verify(parentAccountService).updateProfile(eq(SUBJECT), eq("New"), any(), any());
+    }
+
+    // --- PATCH /me: validation ---
+
+    @Test
+    void patchMeRejectsBlankGivenNameWhenSupplied() throws Exception {
+        mockMvc.perform(patch(PATCH_ME_URI).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "givenName": "   " }
+                                """))
+                .andExpect(status().isBadRequest());
+
+        verify(parentAccountService, never()).updateProfile(any(), any(), any(), any());
+    }
+
+    @Test
+    void patchMeRejectsOverLengthFamilyName() throws Exception {
+        String tooLong = "a".repeat(101);
+
+        mockMvc.perform(patch(PATCH_ME_URI).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "familyName": "%s" }
+                                """.formatted(tooLong)))
+                .andExpect(status().isBadRequest());
+
+        verify(parentAccountService, never()).updateProfile(any(), any(), any(), any());
+    }
+
+    // --- PATCH /me: update behaviour ---
+
+    @Test
+    void patchMeUpdatesGivenName() throws Exception {
+        ParentAccount updated = new ParentAccount(SUBJECT, "parent@example.com", "New", "Lovelace");
+        when(parentAccountService.updateProfile(eq(SUBJECT), eq("New"), isNull(), isNull()))
+                .thenReturn(Optional.of(updated));
+
+        mockMvc.perform(patch(PATCH_ME_URI).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "givenName": "New" }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.givenName").value("New"));
+    }
+
+    @Test
+    void patchMeUpdatesFamilyName() throws Exception {
+        ParentAccount updated = new ParentAccount(SUBJECT, "parent@example.com", "Ada", "NewFamily");
+        when(parentAccountService.updateProfile(eq(SUBJECT), isNull(), eq("NewFamily"), isNull()))
+                .thenReturn(Optional.of(updated));
+
+        mockMvc.perform(patch(PATCH_ME_URI).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "familyName": "NewFamily" }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.familyName").value("NewFamily"));
+    }
+
+    @Test
+    void patchMeEnablesMarketingOptIn() throws Exception {
+        ParentAccount updated = new ParentAccount(SUBJECT, "parent@example.com", "Ada", "Lovelace");
+        updated.updateMarketingOptIn(true);
+        when(parentAccountService.updateProfile(eq(SUBJECT), isNull(), isNull(), eq(true)))
+                .thenReturn(Optional.of(updated));
+
+        mockMvc.perform(patch(PATCH_ME_URI).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "marketingOptIn": true }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.marketingOptIn").value(true));
+    }
+
+    @Test
+    void patchMeDisablesMarketingOptIn() throws Exception {
+        ParentAccount updated = new ParentAccount(SUBJECT, "parent@example.com", "Ada", "Lovelace");
+        when(parentAccountService.updateProfile(eq(SUBJECT), isNull(), isNull(), eq(false)))
+                .thenReturn(Optional.of(updated));
+
+        mockMvc.perform(patch(PATCH_ME_URI).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "marketingOptIn": false }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.marketingOptIn").value(false));
+    }
+
+    @Test
+    void patchMePartialUpdateLeavesOmittedFieldsAsNullInTheServiceCall() throws Exception {
+        ParentAccount updated = new ParentAccount(SUBJECT, "parent@example.com", "New", "Lovelace");
+        when(parentAccountService.updateProfile(eq(SUBJECT), eq("New"), isNull(), isNull()))
+                .thenReturn(Optional.of(updated));
+
+        mockMvc.perform(patch(PATCH_ME_URI).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "givenName": "New" }
+                                """))
+                .andExpect(status().isOk());
+
+        verify(parentAccountService).updateProfile(eq(SUBJECT), eq("New"), isNull(), isNull());
+    }
+
+    @Test
+    void patchMeReturnsNotFoundWhenNoParentAccountExistsForTheAuthenticatedSubject() throws Exception {
+        when(parentAccountService.updateProfile(eq(SUBJECT), any(), any(), any()))
+                .thenReturn(Optional.empty());
+
+        mockMvc.perform(patch(PATCH_ME_URI).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "givenName": "New" }
+                                """))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void patchMeResponseDoesNotExposeInternalOrSecuritySensitiveFields() throws Exception {
+        ParentAccount updated = new ParentAccount(SUBJECT, "parent@example.com", "New", "Lovelace");
+        when(parentAccountService.updateProfile(eq(SUBJECT), any(), any(), any()))
+                .thenReturn(Optional.of(updated));
+
+        mockMvc.perform(patch(PATCH_ME_URI).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "givenName": "New" }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").doesNotExist())
+                .andExpect(jsonPath("$.externalSubject").doesNotExist())
+                .andExpect(jsonPath("$.roles").doesNotExist());
+    }
+
+    @Test
+    void getMeReturnsTheUpdatedProfileAfterPatch() throws Exception {
+        ParentAccount updated = new ParentAccount(SUBJECT, "parent@example.com", "New", "Lovelace");
+        updated.updateMarketingOptIn(true);
+        when(parentAccountService.updateProfile(eq(SUBJECT), eq("New"), isNull(), eq(true)))
+                .thenReturn(Optional.of(updated));
+        when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(updated));
+
+        mockMvc.perform(patch(PATCH_ME_URI).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "givenName": "New", "marketingOptIn": true }
+                                """))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get(GET_ME_URI).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.givenName").value("New"))
+                .andExpect(jsonPath("$.marketingOptIn").value(true));
     }
 }

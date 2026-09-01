@@ -8,6 +8,7 @@ public record ParentAccountResponse(
         String email,
         String givenName,
         String familyName,
+        boolean marketingOptIn,
         LocalDateTime createdAt,
         LocalDateTime updatedAt
 ) {
@@ -17,6 +18,7 @@ public record ParentAccountResponse(
                 account.getEmail(),
                 account.getGivenName(),
                 account.getFamilyName(),
+                account.isMarketingOptIn(),
                 account.getCreatedAt(),
                 account.getUpdatedAt());
     }
