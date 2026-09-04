@@ -3,11 +3,14 @@ package au.com.futureminds.learning.platform.persistence.parentaccount;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -19,8 +22,9 @@ class ParentAccountServiceTest {
 
     private final ParentAccountRepository parentAccountRepository = mock(ParentAccountRepository.class);
     private final ParentProfileAuditRepository parentProfileAuditRepository = mock(ParentProfileAuditRepository.class);
+    private final ParentConsentRepository parentConsentRepository = mock(ParentConsentRepository.class);
     private final ParentAccountService parentAccountService =
-            new ParentAccountService(parentAccountRepository, parentProfileAuditRepository);
+            new ParentAccountService(parentAccountRepository, parentProfileAuditRepository, parentConsentRepository);
 
     private static final String SUBJECT = "keycloak-subject-123";
 
@@ -230,5 +234,77 @@ class ParentAccountServiceTest {
         ArgumentCaptor<List<ParentProfileAudit>> captor = ArgumentCaptor.forClass(List.class);
         verify(parentProfileAuditRepository).saveAll(captor.capture());
         return captor.getValue();
+    }
+
+    // --- consent ---
+
+    @Test
+    void recordConsentCreatesExactlyOneParentConsentRecord() {
+        ParentAccount existing = new ParentAccount(SUBJECT, "parent@example.com", "Ada", "Lovelace");
+        when(parentAccountRepository.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(existing));
+        when(parentConsentRepository.save(any(ParentConsent.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        Optional<ParentConsent> result = parentAccountService.recordConsent(SUBJECT, "PRIVACY_POLICY", "v1");
+
+        assertThat(result).isPresent();
+        ArgumentCaptor<ParentConsent> captor = ArgumentCaptor.forClass(ParentConsent.class);
+        verify(parentConsentRepository, times(1)).save(captor.capture());
+        assertThat(captor.getValue().getParentAccountId()).isEqualTo(existing.getId());
+        assertThat(captor.getValue().getConsentType()).isEqualTo(ParentConsentType.PRIVACY_POLICY);
+        assertThat(captor.getValue().getConsentVersion()).isEqualTo("v1");
+    }
+
+    @Test
+    void recordConsentReturnsEmptyWhenNoParentAccountExistsForSubject() {
+        when(parentAccountRepository.findByExternalSubject(SUBJECT)).thenReturn(Optional.empty());
+
+        Optional<ParentConsent> result = parentAccountService.recordConsent(SUBJECT, "PRIVACY_POLICY", "v1");
+
+        assertThat(result).isEmpty();
+        verify(parentConsentRepository, never()).save(any());
+    }
+
+    @Test
+    void recordConsentNeverAutoProvisionsAParentAccount() {
+        when(parentAccountRepository.findByExternalSubject(SUBJECT)).thenReturn(Optional.empty());
+
+        parentAccountService.recordConsent(SUBJECT, "PRIVACY_POLICY", "v1");
+
+        verify(parentAccountRepository, never()).save(any());
+        verify(parentAccountRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void recordConsentRejectsAnUnsupportedConsentType() {
+        assertThatThrownBy(() -> parentAccountService.recordConsent(SUBJECT, "UNKNOWN_TYPE", "v1"))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(ex -> assertThat(((ResponseStatusException) ex).getStatusCode())
+                        .isEqualTo(HttpStatus.BAD_REQUEST));
+
+        verify(parentAccountRepository, never()).findByExternalSubject(any());
+        verify(parentConsentRepository, never()).save(any());
+    }
+
+    @Test
+    void recordingConsentTwiceCreatesTwoSeparateImmutableRows() {
+        ParentAccount existing = new ParentAccount(SUBJECT, "parent@example.com", "Ada", "Lovelace");
+        when(parentAccountRepository.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(existing));
+        when(parentConsentRepository.save(any(ParentConsent.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        parentAccountService.recordConsent(SUBJECT, "PRIVACY_POLICY", "v1");
+        parentAccountService.recordConsent(SUBJECT, "PRIVACY_POLICY", "v2");
+
+        ArgumentCaptor<ParentConsent> captor = ArgumentCaptor.forClass(ParentConsent.class);
+        verify(parentConsentRepository, times(2)).save(captor.capture());
+        verify(parentConsentRepository, never()).findById(any());
+        verify(parentConsentRepository, never()).saveAndFlush(any());
+
+        List<ParentConsent> saved = captor.getAllValues();
+        assertThat(saved).hasSize(2);
+        assertThat(saved.get(0)).isNotSameAs(saved.get(1));
+        assertThat(saved.get(0).getConsentVersion()).isEqualTo("v1");
+        assertThat(saved.get(1).getConsentVersion()).isEqualTo("v2");
     }
 }

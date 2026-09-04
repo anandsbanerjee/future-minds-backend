@@ -49,6 +49,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, ApiPaths.V1 + "/parents/me").hasRole("PARENT")
                         .requestMatchers(HttpMethod.PUT, ApiPaths.V1 + "/parents/me").hasRole("PARENT")
                         .requestMatchers(HttpMethod.PATCH, ApiPaths.V1 + "/parents/me").hasRole("PARENT")
+                        .requestMatchers(HttpMethod.POST, ApiPaths.V1 + "/parents/me/consents").hasRole("PARENT")
                         .anyRequest().authenticated())
                 // Configure this application as an OAuth2 Resource Server.
                 // Spring Security will validate incoming Bearer JWTs using

@@ -3,8 +3,10 @@ package au.com.futureminds.learning.platform.persistence.parentaccount;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -17,11 +19,14 @@ public class ParentAccountService {
 
     private final ParentAccountRepository parentAccountRepository;
     private final ParentProfileAuditRepository parentProfileAuditRepository;
+    private final ParentConsentRepository parentConsentRepository;
 
     public ParentAccountService(ParentAccountRepository parentAccountRepository,
-                                 ParentProfileAuditRepository parentProfileAuditRepository) {
+                                 ParentProfileAuditRepository parentProfileAuditRepository,
+                                 ParentConsentRepository parentConsentRepository) {
         this.parentAccountRepository = parentAccountRepository;
         this.parentProfileAuditRepository = parentProfileAuditRepository;
+        this.parentConsentRepository = parentConsentRepository;
     }
 
     /**
@@ -61,6 +66,30 @@ public class ParentAccountService {
     public Optional<ParentAccount> updateProfile(String externalSubject, String givenName, String familyName, Boolean marketingOptIn) {
         return parentAccountRepository.findByExternalSubject(externalSubject)
                 .map(account -> applyProfileUpdate(account, givenName, familyName, marketingOptIn));
+    }
+
+    /**
+     * Records ONE immutable consent event for an already-provisioned parent.
+     * Never creates a ParentAccount, and never updates a prior consent row -
+     * each call inserts a new ParentConsent row. marketing_opt_in on
+     * ParentAccount is a separate, application-owned preference and is never
+     * treated as consent here.
+     */
+    @Transactional
+    public Optional<ParentConsent> recordConsent(String externalSubject, String consentType, String consentVersion) {
+        ParentConsentType type = resolveConsentType(consentType);
+
+        return parentAccountRepository.findByExternalSubject(externalSubject)
+                .map(account -> parentConsentRepository.save(
+                        new ParentConsent(account.getId(), type, consentVersion)));
+    }
+
+    private ParentConsentType resolveConsentType(String consentType) {
+        try {
+            return ParentConsentType.valueOf(consentType);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported consent type.");
+        }
     }
 
     private ParentAccount applyProfileUpdate(ParentAccount account, String givenName, String familyName, Boolean marketingOptIn) {
