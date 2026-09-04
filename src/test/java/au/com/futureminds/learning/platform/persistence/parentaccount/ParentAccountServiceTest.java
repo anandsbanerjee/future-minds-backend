@@ -307,4 +307,74 @@ class ParentAccountServiceTest {
         assertThat(saved.get(0).getConsentVersion()).isEqualTo("v1");
         assertThat(saved.get(1).getConsentVersion()).isEqualTo("v2");
     }
+
+    // --- consent status (read) ---
+
+    @Test
+    void findCurrentConsentsReturnsTheRecordedConsentForAnExistingAccount() {
+        ParentAccount existing = new ParentAccount(SUBJECT, "parent@example.com", "Ada", "Lovelace");
+        ParentConsent recorded = new ParentConsent(existing.getId(), ParentConsentType.PRIVACY_POLICY, "v1");
+        when(parentAccountRepository.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(existing));
+        when(parentConsentRepository.findByParentAccountIdOrderByRecordedAtDesc(existing.getId()))
+                .thenReturn(List.of(recorded));
+
+        Optional<List<ParentConsent>> result = parentAccountService.findCurrentConsents(SUBJECT);
+
+        assertThat(result).isPresent();
+        assertThat(result.get()).containsExactly(recorded);
+    }
+
+    @Test
+    void findCurrentConsentsReturnsAnEmptyListWhenTheAccountHasNotRecordedConsent() {
+        ParentAccount existing = new ParentAccount(SUBJECT, "parent@example.com", "Ada", "Lovelace");
+        when(parentAccountRepository.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(existing));
+        when(parentConsentRepository.findByParentAccountIdOrderByRecordedAtDesc(existing.getId()))
+                .thenReturn(List.of());
+
+        Optional<List<ParentConsent>> result = parentAccountService.findCurrentConsents(SUBJECT);
+
+        assertThat(result).isPresent();
+        assertThat(result.get()).isEmpty();
+    }
+
+    @Test
+    void findCurrentConsentsReturnsEmptyOptionalWhenNoParentAccountExistsForSubject() {
+        when(parentAccountRepository.findByExternalSubject(SUBJECT)).thenReturn(Optional.empty());
+
+        Optional<List<ParentConsent>> result = parentAccountService.findCurrentConsents(SUBJECT);
+
+        assertThat(result).isEmpty();
+        verify(parentConsentRepository, never()).findByParentAccountIdOrderByRecordedAtDesc(any());
+    }
+
+    @Test
+    void findCurrentConsentsReturnsOnlyTheMostRecentRowPerConsentType() {
+        ParentAccount existing = new ParentAccount(SUBJECT, "parent@example.com", "Ada", "Lovelace");
+        ParentConsent latest = new ParentConsent(existing.getId(), ParentConsentType.PRIVACY_POLICY, "v2");
+        ParentConsent older = new ParentConsent(existing.getId(), ParentConsentType.PRIVACY_POLICY, "v1");
+        when(parentAccountRepository.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(existing));
+        when(parentConsentRepository.findByParentAccountIdOrderByRecordedAtDesc(existing.getId()))
+                .thenReturn(List.of(latest, older));
+
+        Optional<List<ParentConsent>> result = parentAccountService.findCurrentConsents(SUBJECT);
+
+        assertThat(result.get()).containsExactly(latest);
+    }
+
+    @Test
+    void findCurrentConsentsIsReadOnlyAndNeverWritesAnything() {
+        ParentAccount existing = new ParentAccount(SUBJECT, "parent@example.com", "Ada", "Lovelace");
+        when(parentAccountRepository.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(existing));
+        when(parentConsentRepository.findByParentAccountIdOrderByRecordedAtDesc(existing.getId()))
+                .thenReturn(List.of());
+
+        parentAccountService.findCurrentConsents(SUBJECT);
+
+        verify(parentAccountRepository, never()).save(any());
+        verify(parentAccountRepository, never()).saveAndFlush(any());
+        verify(parentConsentRepository, never()).save(any());
+        verify(parentConsentRepository, never()).saveAndFlush(any());
+        verify(parentConsentRepository, never()).delete(any());
+        verify(parentProfileAuditRepository, never()).saveAll(any());
+    }
 }

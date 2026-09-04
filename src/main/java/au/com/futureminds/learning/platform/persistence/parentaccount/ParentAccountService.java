@@ -9,7 +9,9 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 @Service
@@ -90,6 +92,31 @@ public class ParentAccountService {
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported consent type.");
         }
+    }
+
+    /**
+     * Read-only lookup of the current consent state for an already-provisioned
+     * parent. Never creates a ParentAccount and never writes a ParentConsent
+     * row. Empty Optional means no Future Minds parent account exists for the
+     * subject; an empty list (present Optional) means the account exists but
+     * has not recorded consent - the two are never conflated.
+     * <p>
+     * Rows are append-only (see ParentConsent), so more than one row can exist
+     * for the same consent type; only the most recently recorded row per type
+     * is returned as "current".
+     */
+    public Optional<List<ParentConsent>> findCurrentConsents(String externalSubject) {
+        return parentAccountRepository.findByExternalSubject(externalSubject)
+                .map(account -> latestPerType(
+                        parentConsentRepository.findByParentAccountIdOrderByRecordedAtDesc(account.getId())));
+    }
+
+    private List<ParentConsent> latestPerType(List<ParentConsent> consentsNewestFirst) {
+        Map<ParentConsentType, ParentConsent> latestByType = new LinkedHashMap<>();
+        for (ParentConsent consent : consentsNewestFirst) {
+            latestByType.putIfAbsent(consent.getConsentType(), consent);
+        }
+        return new ArrayList<>(latestByType.values());
     }
 
     private ParentAccount applyProfileUpdate(ParentAccount account, String givenName, String familyName, Boolean marketingOptIn) {

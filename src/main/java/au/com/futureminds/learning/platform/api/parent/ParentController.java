@@ -18,6 +18,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.util.List;
+
 @RestController
 @RequestMapping(ApiPaths.V1 + "/parents")
 public class ParentController {
@@ -93,5 +95,20 @@ public class ParentController {
                         HttpStatus.NOT_FOUND, "Parent account not found."));
 
         return ResponseEntity.status(HttpStatus.CREATED).body(ConsentResponse.from(consent));
+    }
+
+    /**
+     * Read-only - returns the authenticated parent's current consent state.
+     * Never provisions a parent account and never records or modifies
+     * consent. An empty list means the parent account exists but has not yet
+     * recorded consent; a 404 means no Future Minds parent account exists.
+     */
+    @GetMapping("/me/consents")
+    public ResponseEntity<List<ConsentResponse>> getMyConsents(@AuthenticationPrincipal Jwt jwt) {
+        List<ParentConsent> consents = parentAccountService.findCurrentConsents(jwt.getSubject())
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND, "Parent account not found."));
+
+        return ResponseEntity.ok(consents.stream().map(ConsentResponse::from).toList());
     }
 }
