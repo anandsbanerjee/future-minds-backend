@@ -2,17 +2,23 @@ package au.com.futureminds.learning.platform.api.parent;
 
 import au.com.futureminds.learning.platform.persistence.parentaccount.ParentAccount;
 import au.com.futureminds.learning.platform.persistence.parentaccount.ParentAccountService;
+import au.com.futureminds.learning.platform.persistence.parentaccount.ParentConsent;
+import au.com.futureminds.learning.platform.persistence.parentaccount.ParentConsentType;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.web.server.ResponseStatusException;
 
+import java.lang.reflect.Field;
+import java.time.LocalDateTime;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -25,6 +31,7 @@ import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -37,6 +44,7 @@ class ParentControllerTest {
     private static final String PUT_ME_URI = "/api/v1/parents/me";
     private static final String GET_ME_URI = "/api/v1/parents/me";
     private static final String PATCH_ME_URI = "/api/v1/parents/me";
+    private static final String POST_CONSENTS_URI = "/api/v1/parents/me/consents";
     private static final String SUBJECT = "keycloak-subject-abc";
 
     @Autowired
@@ -477,5 +485,195 @@ class ParentControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.givenName").value("New"))
                 .andExpect(jsonPath("$.marketingOptIn").value(true));
+    }
+
+    // --- POST /me/consents: security ---
+
+    @Test
+    void postConsentUnauthenticatedRequestIsRejected() throws Exception {
+        mockMvc.perform(post(POST_CONSENTS_URI)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "consentType": "PRIVACY_POLICY", "consentVersion": "v1" }
+                                """))
+                .andExpect(status().isUnauthorized());
+
+        verify(parentAccountService, never()).recordConsent(any(), any(), any());
+    }
+
+    @Test
+    void postConsentAuthenticatedNonParentRequestIsForbidden() throws Exception {
+        mockMvc.perform(post(POST_CONSENTS_URI).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_STUDENT")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "consentType": "PRIVACY_POLICY", "consentVersion": "v1" }
+                                """))
+                .andExpect(status().isForbidden());
+
+        verify(parentAccountService, never()).recordConsent(any(), any(), any());
+    }
+
+    // --- POST /me/consents: identity ---
+
+    @Test
+    void postConsentDerivesIdentityOnlyFromTheJwtSubject() throws Exception {
+        ParentConsent recorded = new ParentConsent(1L, ParentConsentType.PRIVACY_POLICY, "v1");
+        when(parentAccountService.recordConsent(eq(SUBJECT), eq("PRIVACY_POLICY"), eq("v1")))
+                .thenReturn(Optional.of(recorded));
+
+        mockMvc.perform(post(POST_CONSENTS_URI).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "consentType": "PRIVACY_POLICY", "consentVersion": "v1" }
+                                """))
+                .andExpect(status().isCreated());
+
+        ArgumentCaptor<String> subjectCaptor = ArgumentCaptor.forClass(String.class);
+        verify(parentAccountService).recordConsent(subjectCaptor.capture(), eq("PRIVACY_POLICY"), eq("v1"));
+        assertThat(subjectCaptor.getValue()).isEqualTo(SUBJECT);
+    }
+
+    @Test
+    void postConsentRequestCannotSpoofAnotherIdentityViaTheRequestBody() throws Exception {
+        ParentConsent recorded = new ParentConsent(1L, ParentConsentType.PRIVACY_POLICY, "v1");
+        when(parentAccountService.recordConsent(eq(SUBJECT), eq("PRIVACY_POLICY"), eq("v1")))
+                .thenReturn(Optional.of(recorded));
+
+        mockMvc.perform(post(POST_CONSENTS_URI).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "consentType": "PRIVACY_POLICY",
+                                  "consentVersion": "v1",
+                                  "parentAccountId": 999,
+                                  "externalSubject": "someone-elses-subject",
+                                  "roles": ["ADMIN"]
+                                }
+                                """))
+                .andExpect(status().isCreated());
+
+        ArgumentCaptor<String> subjectCaptor = ArgumentCaptor.forClass(String.class);
+        verify(parentAccountService).recordConsent(subjectCaptor.capture(), eq("PRIVACY_POLICY"), eq("v1"));
+        assertThat(subjectCaptor.getValue()).isEqualTo(SUBJECT);
+    }
+
+    // --- POST /me/consents: behaviour ---
+
+    @Test
+    void postConsentCreatesAndReturnsTheRecordedConsent() throws Exception {
+        ParentConsent recorded = consentRecordedAt(LocalDateTime.of(2026, 9, 4, 10, 0));
+        when(parentAccountService.recordConsent(eq(SUBJECT), eq("PRIVACY_POLICY"), eq("v1")))
+                .thenReturn(Optional.of(recorded));
+
+        mockMvc.perform(post(POST_CONSENTS_URI).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "consentType": "PRIVACY_POLICY", "consentVersion": "v1" }
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.consentType").value("PRIVACY_POLICY"))
+                .andExpect(jsonPath("$.consentVersion").value("v1"))
+                .andExpect(jsonPath("$.recordedAt").value("2026-09-04T10:00:00"));
+    }
+
+    @Test
+    void postConsentReturnsNotFoundWhenNoParentAccountExists() throws Exception {
+        when(parentAccountService.recordConsent(eq(SUBJECT), eq("PRIVACY_POLICY"), eq("v1")))
+                .thenReturn(Optional.empty());
+
+        mockMvc.perform(post(POST_CONSENTS_URI).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "consentType": "PRIVACY_POLICY", "consentVersion": "v1" }
+                                """))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void postConsentRejectsBlankConsentVersion() throws Exception {
+        mockMvc.perform(post(POST_CONSENTS_URI).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "consentType": "PRIVACY_POLICY", "consentVersion": "   " }
+                                """))
+                .andExpect(status().isBadRequest());
+
+        verify(parentAccountService, never()).recordConsent(any(), any(), any());
+    }
+
+    @Test
+    void postConsentRejectsBlankConsentType() throws Exception {
+        mockMvc.perform(post(POST_CONSENTS_URI).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "consentType": "   ", "consentVersion": "v1" }
+                                """))
+                .andExpect(status().isBadRequest());
+
+        verify(parentAccountService, never()).recordConsent(any(), any(), any());
+    }
+
+    @Test
+    void postConsentReturnsBadRequestForUnsupportedConsentType() throws Exception {
+        when(parentAccountService.recordConsent(eq(SUBJECT), eq("UNKNOWN_TYPE"), eq("v1")))
+                .thenThrow(new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported consent type."));
+
+        mockMvc.perform(post(POST_CONSENTS_URI).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "consentType": "UNKNOWN_TYPE", "consentVersion": "v1" }
+                                """))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void postConsentResponseDoesNotExposeInternalOrSecuritySensitiveFields() throws Exception {
+        ParentConsent recorded = new ParentConsent(1L, ParentConsentType.PRIVACY_POLICY, "v1");
+        when(parentAccountService.recordConsent(eq(SUBJECT), eq("PRIVACY_POLICY"), eq("v1")))
+                .thenReturn(Optional.of(recorded));
+
+        mockMvc.perform(post(POST_CONSENTS_URI).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "consentType": "PRIVACY_POLICY", "consentVersion": "v1" }
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.id").doesNotExist())
+                .andExpect(jsonPath("$.parentAccountId").doesNotExist())
+                .andExpect(jsonPath("$.externalSubject").doesNotExist())
+                .andExpect(jsonPath("$.sub").doesNotExist())
+                .andExpect(jsonPath("$.roles").doesNotExist());
+    }
+
+    /**
+     * recordedAt is DB-generated (insertable=false, updatable=false) and has
+     * no setter by design - this test-only helper stands in for what a real
+     * persisted-then-reloaded row would have, so response serialisation can
+     * be asserted without weakening ParentConsent's immutability.
+     */
+    private static ParentConsent consentRecordedAt(LocalDateTime recordedAt) throws Exception {
+        ParentConsent consent = new ParentConsent(1L, ParentConsentType.PRIVACY_POLICY, "v1");
+        Field field = ParentConsent.class.getDeclaredField("recordedAt");
+        field.setAccessible(true);
+        field.set(consent, recordedAt);
+        return consent;
     }
 }

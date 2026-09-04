@@ -3,6 +3,7 @@ package au.com.futureminds.learning.platform.api.parent;
 import au.com.futureminds.learning.platform.api.ApiPaths;
 import au.com.futureminds.learning.platform.persistence.parentaccount.ParentAccount;
 import au.com.futureminds.learning.platform.persistence.parentaccount.ParentAccountService;
+import au.com.futureminds.learning.platform.persistence.parentaccount.ParentConsent;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -10,6 +11,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -75,5 +77,21 @@ public class ParentController {
                         HttpStatus.NOT_FOUND, "Parent account not found."));
 
         return ResponseEntity.ok(ParentAccountResponse.from(account));
+    }
+
+    /**
+     * Records one explicit consent event for the authenticated parent.
+     * Identity is taken solely from the validated JWT subject; the request
+     * carries only what was consented to, never who is consenting.
+     */
+    @PostMapping("/me/consents")
+    public ResponseEntity<ConsentResponse> recordConsent(@AuthenticationPrincipal Jwt jwt,
+                                                           @Valid @RequestBody ConsentRequest request) {
+        ParentConsent consent = parentAccountService.recordConsent(
+                        jwt.getSubject(), request.consentType(), request.consentVersion())
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND, "Parent account not found."));
+
+        return ResponseEntity.status(HttpStatus.CREATED).body(ConsentResponse.from(consent));
     }
 }
