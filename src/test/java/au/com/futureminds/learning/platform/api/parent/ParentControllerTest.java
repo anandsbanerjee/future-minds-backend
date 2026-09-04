@@ -19,6 +19,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.lang.reflect.Field;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -45,6 +46,7 @@ class ParentControllerTest {
     private static final String GET_ME_URI = "/api/v1/parents/me";
     private static final String PATCH_ME_URI = "/api/v1/parents/me";
     private static final String POST_CONSENTS_URI = "/api/v1/parents/me/consents";
+    private static final String GET_CONSENTS_URI = "/api/v1/parents/me/consents";
     private static final String SUBJECT = "keycloak-subject-abc";
 
     @Autowired
@@ -661,6 +663,96 @@ class ParentControllerTest {
                 .andExpect(jsonPath("$.externalSubject").doesNotExist())
                 .andExpect(jsonPath("$.sub").doesNotExist())
                 .andExpect(jsonPath("$.roles").doesNotExist());
+    }
+
+    // --- GET /me/consents: security ---
+
+    @Test
+    void getConsentsUnauthenticatedRequestIsRejected() throws Exception {
+        mockMvc.perform(get(GET_CONSENTS_URI))
+                .andExpect(status().isUnauthorized());
+
+        verify(parentAccountService, never()).findCurrentConsents(any());
+        verify(parentAccountService, never()).recordConsent(any(), any(), any());
+        verify(parentAccountService, never()).provision(any(), any(), any(), any());
+    }
+
+    @Test
+    void getConsentsAuthenticatedNonParentRequestIsForbidden() throws Exception {
+        mockMvc.perform(get(GET_CONSENTS_URI).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_STUDENT"))))
+                .andExpect(status().isForbidden());
+
+        verify(parentAccountService, never()).findCurrentConsents(any());
+    }
+
+    // --- GET /me/consents: identity ---
+
+    @Test
+    void getConsentsDerivesIdentityOnlyFromTheJwtSubject() throws Exception {
+        when(parentAccountService.findCurrentConsents(SUBJECT)).thenReturn(Optional.of(List.of()));
+
+        mockMvc.perform(get(GET_CONSENTS_URI).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT"))))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<String> subjectCaptor = ArgumentCaptor.forClass(String.class);
+        verify(parentAccountService).findCurrentConsents(subjectCaptor.capture());
+        assertThat(subjectCaptor.getValue()).isEqualTo(SUBJECT);
+    }
+
+    // --- GET /me/consents: behaviour ---
+
+    @Test
+    void getConsentsReturnsTheCurrentlyRecordedConsentForTheAuthenticatedParent() throws Exception {
+        ParentConsent recorded = consentRecordedAt(LocalDateTime.of(2026, 9, 4, 10, 0));
+        when(parentAccountService.findCurrentConsents(SUBJECT)).thenReturn(Optional.of(List.of(recorded)));
+
+        mockMvc.perform(get(GET_CONSENTS_URI).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].consentType").value("PRIVACY_POLICY"))
+                .andExpect(jsonPath("$[0].consentVersion").value("v1"))
+                .andExpect(jsonPath("$[0].recordedAt").value("2026-09-04T10:00:00"));
+    }
+
+    @Test
+    void getConsentsReturnsAnEmptyListWhenTheParentHasNotRecordedConsent() throws Exception {
+        when(parentAccountService.findCurrentConsents(SUBJECT)).thenReturn(Optional.of(List.of()));
+
+        mockMvc.perform(get(GET_CONSENTS_URI).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray())
+                .andExpect(jsonPath("$").isEmpty());
+    }
+
+    @Test
+    void getConsentsReturnsNotFoundWhenNoFutureMindsParentAccountExists() throws Exception {
+        when(parentAccountService.findCurrentConsents(SUBJECT)).thenReturn(Optional.empty());
+
+        mockMvc.perform(get(GET_CONSENTS_URI).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT"))))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void getConsentsDoesNotRecordOrModifyConsentOrProvisionAnAccount() throws Exception {
+        when(parentAccountService.findCurrentConsents(SUBJECT)).thenReturn(Optional.of(List.of()));
+
+        mockMvc.perform(get(GET_CONSENTS_URI).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT"))))
+                .andExpect(status().isOk());
+
+        verify(parentAccountService, never()).recordConsent(any(), any(), any());
+        verify(parentAccountService, never()).provision(any(), any(), any(), any());
+        verify(parentAccountService, never()).updateProfile(any(), any(), any(), any());
     }
 
     /**
