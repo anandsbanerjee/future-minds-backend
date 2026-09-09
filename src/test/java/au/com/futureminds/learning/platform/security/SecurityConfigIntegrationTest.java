@@ -1,6 +1,7 @@
 package au.com.futureminds.learning.platform.security;
 
 import au.com.futureminds.learning.platform.persistence.parentaccount.ParentAccountService;
+import au.com.futureminds.learning.platform.persistence.student.StudentService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -28,10 +29,13 @@ class SecurityConfigIntegrationTest {
     @Autowired
     private PasswordEncoder passwordEncoder;
 
-    // The "test" profile excludes DataSource/JPA autoconfiguration; ParentAccountService
-    // needs a real ParentAccountRepository, so it is mocked out here rather than constructed.
+    // The "test" profile excludes DataSource/JPA autoconfiguration; ParentAccountService/
+    // StudentService need a real repository, so they are mocked out here rather than constructed.
     @MockitoBean
     private ParentAccountService parentAccountService;
+
+    @MockitoBean
+    private StudentService studentService;
 
     @Test
     void systemStatusIsPublic() throws Exception {
