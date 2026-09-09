@@ -9,6 +9,7 @@ import com.nimbusds.jose.jwk.gen.RSAKeyGenerator;
 import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
 import au.com.futureminds.learning.platform.persistence.parentaccount.ParentAccountService;
+import au.com.futureminds.learning.platform.persistence.student.StudentService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -69,12 +70,16 @@ class RealJwtDecoderRejectionIntegrationTest {
     @Autowired
     private MockMvc mockMvc;
 
-    // Full application context boots ParentController regardless of which
-    // endpoints this test exercises; the "test" profile excludes DataSource/JPA
-    // autoconfiguration, so ParentAccountService's repository dependency must
-    // be mocked out here too (same reasoning as the existing security tests).
+    // Full application context boots ParentController and StudentController
+    // regardless of which endpoints this test exercises; the "test" profile
+    // excludes DataSource/JPA autoconfiguration, so their repository-backed
+    // services must be mocked out here too (same reasoning as the existing
+    // security tests).
     @MockitoBean
     private ParentAccountService parentAccountService;
+
+    @MockitoBean
+    private StudentService studentService;
 
     @TestConfiguration
     static class RealDecoderConfig {

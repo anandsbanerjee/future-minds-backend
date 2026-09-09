@@ -4,6 +4,7 @@ import au.com.futureminds.learning.platform.persistence.parentaccount.ParentAcco
 import au.com.futureminds.learning.platform.persistence.parentaccount.ParentAccountService;
 import au.com.futureminds.learning.platform.persistence.parentaccount.ParentConsent;
 import au.com.futureminds.learning.platform.persistence.parentaccount.ParentConsentType;
+import au.com.futureminds.learning.platform.persistence.student.StudentService;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -54,6 +55,12 @@ class ParentControllerTest {
 
     @MockitoBean
     private ParentAccountService parentAccountService;
+
+    // Full application context also boots StudentController; the "test" profile
+    // excludes DataSource/JPA autoconfiguration, so StudentService's repository
+    // dependency must be mocked out here too (same reasoning as ParentAccountService).
+    @MockitoBean
+    private StudentService studentService;
 
     @Test
     void unauthenticatedRequestIsRejected() throws Exception {

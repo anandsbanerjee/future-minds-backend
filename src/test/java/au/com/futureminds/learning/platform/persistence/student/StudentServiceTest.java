@@ -1,0 +1,170 @@
+package au.com.futureminds.learning.platform.persistence.student;
+
+import au.com.futureminds.learning.platform.persistence.parentaccount.ParentAccount;
+import au.com.futureminds.learning.platform.persistence.parentaccount.ParentAccountService;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.web.server.ResponseStatusException;
+
+import java.util.Optional;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
+
+class StudentServiceTest {
+
+    private final ParentAccountService parentAccountService = mock(ParentAccountService.class);
+    private final StudentRepository studentRepository = mock(StudentRepository.class);
+    private final StudentService studentService = new StudentService(parentAccountService, studentRepository);
+
+    private static final String SUBJECT = "keycloak-subject-abc";
+
+    @Test
+    void resolvesParentByTheAuthenticatedExternalSubject() {
+        ParentAccount account = new ParentAccount(SUBJECT, "parent@example.com", "Ada", "Lovelace");
+        when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(account));
+        when(studentRepository.saveAndFlush(any(Student.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        studentService.create(SUBJECT, "Aarav", "YEAR_5", "SELECTIVE_MATHEMATICS");
+
+        verify(parentAccountService).findByExternalSubject(SUBJECT);
+    }
+
+    @Test
+    void persistsTheStudentAgainstTheResolvedInternalParentAccountId() {
+        ParentAccount account = new ParentAccount(SUBJECT, "parent@example.com", "Ada", "Lovelace");
+        setId(account, 42L);
+        when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(account));
+        when(studentRepository.saveAndFlush(any(Student.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        Optional<Student> result = studentService.create(SUBJECT, "Aarav", "YEAR_5", "SELECTIVE_MATHEMATICS");
+
+        ArgumentCaptor<Student> studentCaptor = ArgumentCaptor.forClass(Student.class);
+        verify(studentRepository).saveAndFlush(studentCaptor.capture());
+        assertThat(studentCaptor.getValue().getParentAccountId()).isEqualTo(42L);
+        assertThat(result).isPresent();
+        assertThat(result.get().getParentAccountId()).isEqualTo(42L);
+    }
+
+    @Test
+    void savesTheStudentForAResolvedParent() {
+        ParentAccount account = new ParentAccount(SUBJECT, "parent@example.com", "Ada", "Lovelace");
+        when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(account));
+        when(studentRepository.saveAndFlush(any(Student.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        studentService.create(SUBJECT, "Aarav", "YEAR_5", "SELECTIVE_MATHEMATICS");
+
+        verify(studentRepository).saveAndFlush(any(Student.class));
+    }
+
+    @Test
+    void doesNotSaveAStudentWhenNoParentAccountExists() {
+        when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.empty());
+
+        Optional<Student> result = studentService.create(SUBJECT, "Aarav", "YEAR_5", "SELECTIVE_MATHEMATICS");
+
+        assertThat(result).isEmpty();
+        verify(studentRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void persistsValidSchoolYearAndPreparationGoal() {
+        ParentAccount account = new ParentAccount(SUBJECT, "parent@example.com", "Ada", "Lovelace");
+        when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(account));
+        when(studentRepository.saveAndFlush(any(Student.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        Optional<Student> result = studentService.create(SUBJECT, "Aarav", "YEAR_5", "YEAR_5_MATHEMATICS");
+
+        assertThat(result).isPresent();
+        assertThat(result.get().getSchoolYear()).isEqualTo(SchoolYear.YEAR_5);
+        assertThat(result.get().getPreparationGoal()).isEqualTo(PreparationGoal.YEAR_5_MATHEMATICS);
+        assertThat(result.get().getFirstName()).isEqualTo("Aarav");
+    }
+
+    @Test
+    void rejectsAnUnsupportedSchoolYearBeforeTouchingTheRepository() {
+        assertThatThrownBy(() -> studentService.create(SUBJECT, "Aarav", "YEAR_9", "SELECTIVE_MATHEMATICS"))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(ex -> assertThat(((ResponseStatusException) ex).getStatusCode().value()).isEqualTo(400));
+
+        verify(parentAccountService, never()).findByExternalSubject(any());
+        verify(studentRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void rejectsAnUnsupportedPreparationGoalBeforeTouchingTheRepository() {
+        assertThatThrownBy(() -> studentService.create(SUBJECT, "Aarav", "YEAR_5", "UNKNOWN_GOAL"))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(ex -> assertThat(((ResponseStatusException) ex).getStatusCode().value()).isEqualTo(400));
+
+        verify(parentAccountService, never()).findByExternalSubject(any());
+        verify(studentRepository, never()).saveAndFlush(any());
+    }
+
+    // --- duplicate detection ---
+
+    @Test
+    void rejectsACreateThatDuplicatesAnExistingStudentForTheSameParent() {
+        ParentAccount account = new ParentAccount(SUBJECT, "parent@example.com", "Ada", "Lovelace");
+        setId(account, 42L);
+        when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(account));
+        when(studentRepository.existsByParentAccountIdAndFirstNameAndSchoolYearAndPreparationGoal(
+                eq(42L), eq("Aarav"), eq(SchoolYear.YEAR_5), eq(PreparationGoal.SELECTIVE_MATHEMATICS)))
+                .thenReturn(true);
+
+        assertThatThrownBy(() -> studentService.create(SUBJECT, "Aarav", "YEAR_5", "SELECTIVE_MATHEMATICS"))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(ex -> assertThat(((ResponseStatusException) ex).getStatusCode().value()).isEqualTo(409));
+
+        verify(studentRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void rejectsAConcurrentDuplicateCreateThatRacesPastTheExistenceCheck() {
+        ParentAccount account = new ParentAccount(SUBJECT, "parent@example.com", "Ada", "Lovelace");
+        setId(account, 42L);
+        when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(account));
+        when(studentRepository.existsByParentAccountIdAndFirstNameAndSchoolYearAndPreparationGoal(
+                any(), any(), any(), any())).thenReturn(false);
+        when(studentRepository.saveAndFlush(any(Student.class)))
+                .thenThrow(new DataIntegrityViolationException("duplicate key"));
+
+        assertThatThrownBy(() -> studentService.create(SUBJECT, "Aarav", "YEAR_5", "SELECTIVE_MATHEMATICS"))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(ex -> assertThat(((ResponseStatusException) ex).getStatusCode().value()).isEqualTo(409));
+    }
+
+    @Test
+    void allowsTwoDifferentStudentsForTheSameParent() {
+        ParentAccount account = new ParentAccount(SUBJECT, "parent@example.com", "Ada", "Lovelace");
+        setId(account, 42L);
+        when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(account));
+        when(studentRepository.existsByParentAccountIdAndFirstNameAndSchoolYearAndPreparationGoal(
+                any(), any(), any(), any())).thenReturn(false);
+        when(studentRepository.saveAndFlush(any(Student.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        Optional<Student> first = studentService.create(SUBJECT, "Aarav", "YEAR_5", "SELECTIVE_MATHEMATICS");
+        Optional<Student> second = studentService.create(SUBJECT, "Priya", "YEAR_5", "SELECTIVE_MATHEMATICS");
+
+        assertThat(first).isPresent();
+        assertThat(second).isPresent();
+        verify(studentRepository, org.mockito.Mockito.times(2)).saveAndFlush(any(Student.class));
+    }
+
+    private static void setId(ParentAccount account, Long id) {
+        try {
+            var field = ParentAccount.class.getDeclaredField("id");
+            field.setAccessible(true);
+            field.set(account, id);
+        } catch (ReflectiveOperationException e) {
+            throw new RuntimeException(e);
+        }
+    }
+}
