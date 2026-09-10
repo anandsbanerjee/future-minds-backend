@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.util.List;
 import java.util.Optional;
 
 @Service
@@ -56,6 +57,21 @@ public class StudentService {
         } catch (DataIntegrityViolationException raceLost) {
             throw duplicateStudentException();
         }
+    }
+
+    /**
+     * Read-only lookup of the authenticated parent's own students. Ownership
+     * is derived solely from the resolved ParentAccount.id - never from a
+     * client-supplied identifier - so this can never return another parent's
+     * students. Empty Optional means no Future Minds parent account exists
+     * for the subject; a present-but-empty list means the account exists and
+     * simply has no students yet, so the controller returns 200 [] rather
+     * than 404. Students are returned in ID (creation) order for a
+     * deterministic, predictable response without introducing sorting/paging.
+     */
+    public Optional<List<Student>> findAllForParent(String externalSubject) {
+        return parentAccountService.findByExternalSubject(externalSubject)
+                .map(account -> studentRepository.findByParentAccountIdOrderByIdAsc(account.getId()));
     }
 
     private ResponseStatusException duplicateStudentException() {

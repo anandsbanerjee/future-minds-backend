@@ -7,6 +7,7 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -156,6 +157,61 @@ class StudentServiceTest {
         assertThat(first).isPresent();
         assertThat(second).isPresent();
         verify(studentRepository, org.mockito.Mockito.times(2)).saveAndFlush(any(Student.class));
+    }
+
+    // --- list students for the authenticated parent ---
+
+    @Test
+    void returnsAllStudentsForTheResolvedParentInIdOrder() {
+        ParentAccount account = new ParentAccount(SUBJECT, "parent@example.com", "Ada", "Lovelace");
+        setId(account, 42L);
+        Student first = new Student(42L, "Aarav", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
+        Student second = new Student(42L, "Priya", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
+        when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(account));
+        when(studentRepository.findByParentAccountIdOrderByIdAsc(42L)).thenReturn(List.of(first, second));
+
+        Optional<List<Student>> result = studentService.findAllForParent(SUBJECT);
+
+        assertThat(result).isPresent();
+        assertThat(result.get()).containsExactly(first, second);
+    }
+
+    @Test
+    void returnsAnEmptyListWhenTheResolvedParentHasNoStudents() {
+        ParentAccount account = new ParentAccount(SUBJECT, "parent@example.com", "Ada", "Lovelace");
+        setId(account, 42L);
+        when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(account));
+        when(studentRepository.findByParentAccountIdOrderByIdAsc(42L)).thenReturn(List.of());
+
+        Optional<List<Student>> result = studentService.findAllForParent(SUBJECT);
+
+        assertThat(result).isPresent();
+        assertThat(result.get()).isEmpty();
+    }
+
+    @Test
+    void returnsEmptyOptionalWhenNoParentAccountExistsForListingStudents() {
+        when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.empty());
+
+        Optional<List<Student>> result = studentService.findAllForParent(SUBJECT);
+
+        assertThat(result).isEmpty();
+        verify(studentRepository, never()).findByParentAccountIdOrderByIdAsc(any());
+    }
+
+    @Test
+    void queriesOnlyByTheInternallyResolvedParentAccountIdNeverAnotherParents() {
+        ParentAccount parentA = new ParentAccount(SUBJECT, "a@example.com", "Ada", "Lovelace");
+        setId(parentA, 42L);
+        Student parentAsStudent = new Student(42L, "Aarav", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
+        when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(parentA));
+        when(studentRepository.findByParentAccountIdOrderByIdAsc(42L)).thenReturn(List.of(parentAsStudent));
+
+        studentService.findAllForParent(SUBJECT);
+
+        ArgumentCaptor<Long> parentAccountIdCaptor = ArgumentCaptor.forClass(Long.class);
+        verify(studentRepository).findByParentAccountIdOrderByIdAsc(parentAccountIdCaptor.capture());
+        assertThat(parentAccountIdCaptor.getValue()).isEqualTo(42L);
     }
 
     private static void setId(ParentAccount account, Long id) {
