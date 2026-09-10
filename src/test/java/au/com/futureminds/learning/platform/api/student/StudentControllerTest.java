@@ -19,6 +19,7 @@ import org.springframework.web.server.ResponseStatusException;
 import org.springframework.http.HttpStatus;
 
 import java.lang.reflect.Field;
+import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -28,6 +29,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -38,7 +40,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class StudentControllerTest {
 
     private static final String POST_STUDENTS_URI = "/api/v1/parents/me/students";
+    private static final String GET_STUDENTS_URI = "/api/v1/parents/me/students";
     private static final String SUBJECT = "keycloak-subject-abc";
+    private static final String OTHER_SUBJECT = "keycloak-subject-xyz";
 
     @Autowired
     private MockMvc mockMvc;
@@ -263,6 +267,120 @@ class StudentControllerTest {
                         .authorities(new SimpleGrantedAuthority("ROLE_PARENT")))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(validBody()))
+                .andExpect(status().isNotFound());
+    }
+
+    // --- list students: security ---
+
+    @Test
+    void unauthenticatedListRequestIsRejected() throws Exception {
+        mockMvc.perform(get(GET_STUDENTS_URI))
+                .andExpect(status().isUnauthorized());
+
+        verify(studentService, never()).findAllForParent(any());
+    }
+
+    @Test
+    void authenticatedNonParentListRequestIsForbidden() throws Exception {
+        mockMvc.perform(get(GET_STUDENTS_URI).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_STUDENT"))))
+                .andExpect(status().isForbidden());
+
+        verify(studentService, never()).findAllForParent(any());
+    }
+
+    // --- list students: behaviour ---
+
+    @Test
+    void authenticatedParentWithOneStudentReceivesThatStudent() throws Exception {
+        Student student = student(1L, "Aarav", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
+        when(studentService.findAllForParent(SUBJECT)).thenReturn(Optional.of(List.of(student)));
+
+        mockMvc.perform(get(GET_STUDENTS_URI).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].id").value(1))
+                .andExpect(jsonPath("$[0].firstName").value("Aarav"))
+                .andExpect(jsonPath("$[0].schoolYear").value("YEAR_5"))
+                .andExpect(jsonPath("$[0].preparationGoal").value("SELECTIVE_MATHEMATICS"));
+    }
+
+    @Test
+    void authenticatedParentWithMultipleStudentsReceivesAllOfThemInDeterministicOrder() throws Exception {
+        Student first = student(1L, "Aarav", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
+        Student second = student(2L, "Priya", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
+        when(studentService.findAllForParent(SUBJECT)).thenReturn(Optional.of(List.of(first, second)));
+
+        mockMvc.perform(get(GET_STUDENTS_URI).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].id").value(1))
+                .andExpect(jsonPath("$[1].id").value(2));
+    }
+
+    @Test
+    void authenticatedParentWithNoStudentsReceivesAnEmptyList() throws Exception {
+        when(studentService.findAllForParent(SUBJECT)).thenReturn(Optional.of(List.of()));
+
+        mockMvc.perform(get(GET_STUDENTS_URI).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(0));
+    }
+
+    @Test
+    void ownershipIsDerivedOnlyFromTheJwtSubjectWhenListingStudents() throws Exception {
+        Student ownStudent = student(1L, "Aarav", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
+        when(studentService.findAllForParent(SUBJECT)).thenReturn(Optional.of(List.of(ownStudent)));
+        when(studentService.findAllForParent(OTHER_SUBJECT)).thenReturn(Optional.of(List.of()));
+
+        mockMvc.perform(get(GET_STUDENTS_URI).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].firstName").value("Aarav"));
+
+        mockMvc.perform(get(GET_STUDENTS_URI).with(jwt()
+                        .jwt(builder -> builder.subject(OTHER_SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(0));
+
+        verify(studentService).findAllForParent(SUBJECT);
+        verify(studentService).findAllForParent(OTHER_SUBJECT);
+    }
+
+    @Test
+    void listResponseDoesNotExposeParentOwnershipIdentifiers() throws Exception {
+        Student student = student(1L, "Aarav", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
+        when(studentService.findAllForParent(SUBJECT)).thenReturn(Optional.of(List.of(student)));
+
+        mockMvc.perform(get(GET_STUDENTS_URI).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].parentAccountId").doesNotExist())
+                .andExpect(jsonPath("$[0].externalSubject").doesNotExist())
+                .andExpect(jsonPath("$[0].createdAt").doesNotExist())
+                .andExpect(jsonPath("$[0].updatedAt").doesNotExist());
+    }
+
+    // --- list students: missing parent account ---
+
+    @Test
+    void missingFutureMindsParentAccountReturnsNotFoundWhenListingStudents() throws Exception {
+        when(studentService.findAllForParent(SUBJECT)).thenReturn(Optional.empty());
+
+        mockMvc.perform(get(GET_STUDENTS_URI).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT"))))
                 .andExpect(status().isNotFound());
     }
 
