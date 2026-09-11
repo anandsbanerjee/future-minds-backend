@@ -9,6 +9,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -59,5 +60,23 @@ public class StudentController {
                         HttpStatus.NOT_FOUND, "Parent account not found."));
 
         return ResponseEntity.ok(students.stream().map(StudentResponse::from).toList());
+    }
+
+    /**
+     * Read-only - identity is taken solely from the validated JWT subject and
+     * combined with the path studentId in the same ownership-scoped
+     * repository query, so a caller can never retrieve another parent's
+     * student. A 404 is returned whether the student doesn't exist, belongs
+     * to another parent, or no Future Minds parent account exists for the
+     * subject - the response never reveals which.
+     */
+    @GetMapping("/{studentId}")
+    public ResponseEntity<StudentResponse> getMyStudent(@AuthenticationPrincipal Jwt jwt,
+                                                          @PathVariable Long studentId) {
+        Student student = studentService.findOneForParent(jwt.getSubject(), studentId)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND, "Student not found."));
+
+        return ResponseEntity.ok(StudentResponse.from(student));
     }
 }

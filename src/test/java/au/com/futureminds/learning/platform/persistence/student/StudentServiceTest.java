@@ -26,6 +26,7 @@ class StudentServiceTest {
     private final StudentService studentService = new StudentService(parentAccountService, studentRepository);
 
     private static final String SUBJECT = "keycloak-subject-abc";
+    private static final String OTHER_SUBJECT = "keycloak-subject-xyz";
 
     @Test
     void resolvesParentByTheAuthenticatedExternalSubject() {
@@ -212,6 +213,74 @@ class StudentServiceTest {
         ArgumentCaptor<Long> parentAccountIdCaptor = ArgumentCaptor.forClass(Long.class);
         verify(studentRepository).findByParentAccountIdOrderByIdAsc(parentAccountIdCaptor.capture());
         assertThat(parentAccountIdCaptor.getValue()).isEqualTo(42L);
+    }
+
+    // --- get one student for the authenticated parent ---
+
+    @Test
+    void resolvesParentByTheAuthenticatedExternalSubjectWhenGettingOneStudent() {
+        ParentAccount account = new ParentAccount(SUBJECT, "parent@example.com", "Ada", "Lovelace");
+        setId(account, 42L);
+        Student student = new Student(42L, "Aarav", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
+        when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(account));
+        when(studentRepository.findByIdAndParentAccountId(1L, 42L)).thenReturn(Optional.of(student));
+
+        studentService.findOneForParent(SUBJECT, 1L);
+
+        verify(parentAccountService).findByExternalSubject(SUBJECT);
+    }
+
+    @Test
+    void queriesTheRepositoryUsingBothTheStudentIdAndTheResolvedInternalParentAccountId() {
+        ParentAccount account = new ParentAccount(SUBJECT, "parent@example.com", "Ada", "Lovelace");
+        setId(account, 42L);
+        Student student = new Student(42L, "Aarav", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
+        when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(account));
+        when(studentRepository.findByIdAndParentAccountId(1L, 42L)).thenReturn(Optional.of(student));
+
+        Optional<Student> result = studentService.findOneForParent(SUBJECT, 1L);
+
+        ArgumentCaptor<Long> studentIdCaptor = ArgumentCaptor.forClass(Long.class);
+        ArgumentCaptor<Long> parentAccountIdCaptor = ArgumentCaptor.forClass(Long.class);
+        verify(studentRepository).findByIdAndParentAccountId(studentIdCaptor.capture(), parentAccountIdCaptor.capture());
+        assertThat(studentIdCaptor.getValue()).isEqualTo(1L);
+        assertThat(parentAccountIdCaptor.getValue()).isEqualTo(42L);
+        assertThat(result).contains(student);
+    }
+
+    @Test
+    void doesNotQueryTheRepositoryWhenNoParentAccountExistsForGettingOneStudent() {
+        when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.empty());
+
+        Optional<Student> result = studentService.findOneForParent(SUBJECT, 1L);
+
+        assertThat(result).isEmpty();
+        verify(studentRepository, never()).findByIdAndParentAccountId(any(), any());
+    }
+
+    @Test
+    void returnsEmptyWhenTheOwnershipScopedLookupFindsNothing() {
+        ParentAccount account = new ParentAccount(SUBJECT, "parent@example.com", "Ada", "Lovelace");
+        setId(account, 42L);
+        when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(account));
+        when(studentRepository.findByIdAndParentAccountId(999L, 42L)).thenReturn(Optional.empty());
+
+        Optional<Student> result = studentService.findOneForParent(SUBJECT, 999L);
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    void aStudentBelongingToAnotherParentCannotBeRetrievedUsingOnlyItsId() {
+        ParentAccount otherParent = new ParentAccount(OTHER_SUBJECT, "other@example.com", "Grace", "Hopper");
+        setId(otherParent, 99L);
+        when(parentAccountService.findByExternalSubject(OTHER_SUBJECT)).thenReturn(Optional.of(otherParent));
+        when(studentRepository.findByIdAndParentAccountId(1L, 99L)).thenReturn(Optional.empty());
+
+        Optional<Student> result = studentService.findOneForParent(OTHER_SUBJECT, 1L);
+
+        assertThat(result).isEmpty();
+        verify(studentRepository).findByIdAndParentAccountId(1L, 99L);
     }
 
     private static void setId(ParentAccount account, Long id) {

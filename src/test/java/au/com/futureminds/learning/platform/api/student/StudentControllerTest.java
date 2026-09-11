@@ -44,6 +44,10 @@ class StudentControllerTest {
     private static final String SUBJECT = "keycloak-subject-abc";
     private static final String OTHER_SUBJECT = "keycloak-subject-xyz";
 
+    private static String getStudentUri(Object studentId) {
+        return "/api/v1/parents/me/students/" + studentId;
+    }
+
     @Autowired
     private MockMvc mockMvc;
 
@@ -379,6 +383,103 @@ class StudentControllerTest {
         when(studentService.findAllForParent(SUBJECT)).thenReturn(Optional.empty());
 
         mockMvc.perform(get(GET_STUDENTS_URI).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT"))))
+                .andExpect(status().isNotFound());
+    }
+
+    // --- get one student: security ---
+
+    @Test
+    void unauthenticatedGetOneRequestIsRejected() throws Exception {
+        mockMvc.perform(get(getStudentUri(1L)))
+                .andExpect(status().isUnauthorized());
+
+        verify(studentService, never()).findOneForParent(any(), any());
+    }
+
+    @Test
+    void authenticatedNonParentGetOneRequestIsForbidden() throws Exception {
+        mockMvc.perform(get(getStudentUri(1L)).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_STUDENT"))))
+                .andExpect(status().isForbidden());
+
+        verify(studentService, never()).findOneForParent(any(), any());
+    }
+
+    // --- get one student: behaviour ---
+
+    @Test
+    void authenticatedParentCanRetrieveOwnStudent() throws Exception {
+        Student student = student(1L, "Aarav", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
+        when(studentService.findOneForParent(SUBJECT, 1L)).thenReturn(Optional.of(student));
+
+        mockMvc.perform(get(getStudentUri(1L)).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(1))
+                .andExpect(jsonPath("$.firstName").value("Aarav"))
+                .andExpect(jsonPath("$.schoolYear").value("YEAR_5"))
+                .andExpect(jsonPath("$.preparationGoal").value("SELECTIVE_MATHEMATICS"));
+    }
+
+    @Test
+    void getOneResponseDoesNotExposeParentOwnershipIdentifiers() throws Exception {
+        Student student = student(1L, "Aarav", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
+        when(studentService.findOneForParent(SUBJECT, 1L)).thenReturn(Optional.of(student));
+
+        mockMvc.perform(get(getStudentUri(1L)).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.parentAccountId").doesNotExist())
+                .andExpect(jsonPath("$.externalSubject").doesNotExist())
+                .andExpect(jsonPath("$.createdAt").doesNotExist())
+                .andExpect(jsonPath("$.updatedAt").doesNotExist());
+    }
+
+    @Test
+    void ownershipIsDerivedOnlyFromTheJwtSubjectWhenGettingOneStudent() throws Exception {
+        Student student = student(1L, "Aarav", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
+        when(studentService.findOneForParent(SUBJECT, 1L)).thenReturn(Optional.of(student));
+
+        mockMvc.perform(get(getStudentUri(1L)).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT"))))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<String> subjectCaptor = ArgumentCaptor.forClass(String.class);
+        verify(studentService).findOneForParent(subjectCaptor.capture(), eq(1L));
+        assertThat(subjectCaptor.getValue()).isEqualTo(SUBJECT);
+    }
+
+    @Test
+    void nonexistentStudentReturnsNotFound() throws Exception {
+        when(studentService.findOneForParent(SUBJECT, 999L)).thenReturn(Optional.empty());
+
+        mockMvc.perform(get(getStudentUri(999L)).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT"))))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void studentBelongingToAnotherParentReturnsNotFound() throws Exception {
+        when(studentService.findOneForParent(OTHER_SUBJECT, 1L)).thenReturn(Optional.empty());
+
+        mockMvc.perform(get(getStudentUri(1L)).with(jwt()
+                        .jwt(builder -> builder.subject(OTHER_SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT"))))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void missingFutureMindsParentAccountReturnsNotFoundWhenGettingOneStudent() throws Exception {
+        when(studentService.findOneForParent(SUBJECT, 1L)).thenReturn(Optional.empty());
+
+        mockMvc.perform(get(getStudentUri(1L)).with(jwt()
                         .jwt(builder -> builder.subject(SUBJECT))
                         .authorities(new SimpleGrantedAuthority("ROLE_PARENT"))))
                 .andExpect(status().isNotFound());
