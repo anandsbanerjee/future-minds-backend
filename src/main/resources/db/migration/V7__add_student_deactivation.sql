@@ -1,0 +1,2 @@
+ALTER TABLE student
+    ADD COLUMN deactivated_at TIMESTAMP NULL DEFAULT NULL;

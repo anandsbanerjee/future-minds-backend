@@ -13,7 +13,9 @@ public interface StudentRepository extends JpaRepository<Student, Long> {
     boolean existsByParentAccountIdAndFirstNameAndSchoolYearAndPreparationGoalAndIdNot(
             Long parentAccountId, String firstName, SchoolYear schoolYear, PreparationGoal preparationGoal, Long id);
 
-    List<Student> findByParentAccountIdOrderByIdAsc(Long parentAccountId);
+    List<Student> findByParentAccountIdAndDeactivatedAtIsNullOrderByIdAsc(Long parentAccountId);
 
     Optional<Student> findByIdAndParentAccountId(Long id, Long parentAccountId);
+
+    Optional<Student> findByIdAndParentAccountIdAndDeactivatedAtIsNull(Long id, Long parentAccountId);
 }

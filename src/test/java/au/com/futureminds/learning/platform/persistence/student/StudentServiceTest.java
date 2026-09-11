@@ -7,6 +7,7 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -169,7 +170,7 @@ class StudentServiceTest {
         Student first = new Student(42L, "Aarav", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
         Student second = new Student(42L, "Priya", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
         when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(account));
-        when(studentRepository.findByParentAccountIdOrderByIdAsc(42L)).thenReturn(List.of(first, second));
+        when(studentRepository.findByParentAccountIdAndDeactivatedAtIsNullOrderByIdAsc(42L)).thenReturn(List.of(first, second));
 
         Optional<List<Student>> result = studentService.findAllForParent(SUBJECT);
 
@@ -182,7 +183,7 @@ class StudentServiceTest {
         ParentAccount account = new ParentAccount(SUBJECT, "parent@example.com", "Ada", "Lovelace");
         setId(account, 42L);
         when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(account));
-        when(studentRepository.findByParentAccountIdOrderByIdAsc(42L)).thenReturn(List.of());
+        when(studentRepository.findByParentAccountIdAndDeactivatedAtIsNullOrderByIdAsc(42L)).thenReturn(List.of());
 
         Optional<List<Student>> result = studentService.findAllForParent(SUBJECT);
 
@@ -197,7 +198,7 @@ class StudentServiceTest {
         Optional<List<Student>> result = studentService.findAllForParent(SUBJECT);
 
         assertThat(result).isEmpty();
-        verify(studentRepository, never()).findByParentAccountIdOrderByIdAsc(any());
+        verify(studentRepository, never()).findByParentAccountIdAndDeactivatedAtIsNullOrderByIdAsc(any());
     }
 
     @Test
@@ -206,12 +207,12 @@ class StudentServiceTest {
         setId(parentA, 42L);
         Student parentAsStudent = new Student(42L, "Aarav", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
         when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(parentA));
-        when(studentRepository.findByParentAccountIdOrderByIdAsc(42L)).thenReturn(List.of(parentAsStudent));
+        when(studentRepository.findByParentAccountIdAndDeactivatedAtIsNullOrderByIdAsc(42L)).thenReturn(List.of(parentAsStudent));
 
         studentService.findAllForParent(SUBJECT);
 
         ArgumentCaptor<Long> parentAccountIdCaptor = ArgumentCaptor.forClass(Long.class);
-        verify(studentRepository).findByParentAccountIdOrderByIdAsc(parentAccountIdCaptor.capture());
+        verify(studentRepository).findByParentAccountIdAndDeactivatedAtIsNullOrderByIdAsc(parentAccountIdCaptor.capture());
         assertThat(parentAccountIdCaptor.getValue()).isEqualTo(42L);
     }
 
@@ -223,7 +224,7 @@ class StudentServiceTest {
         setId(account, 42L);
         Student student = new Student(42L, "Aarav", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
         when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(account));
-        when(studentRepository.findByIdAndParentAccountId(1L, 42L)).thenReturn(Optional.of(student));
+        when(studentRepository.findByIdAndParentAccountIdAndDeactivatedAtIsNull(1L, 42L)).thenReturn(Optional.of(student));
 
         studentService.findOneForParent(SUBJECT, 1L);
 
@@ -236,13 +237,13 @@ class StudentServiceTest {
         setId(account, 42L);
         Student student = new Student(42L, "Aarav", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
         when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(account));
-        when(studentRepository.findByIdAndParentAccountId(1L, 42L)).thenReturn(Optional.of(student));
+        when(studentRepository.findByIdAndParentAccountIdAndDeactivatedAtIsNull(1L, 42L)).thenReturn(Optional.of(student));
 
         Optional<Student> result = studentService.findOneForParent(SUBJECT, 1L);
 
         ArgumentCaptor<Long> studentIdCaptor = ArgumentCaptor.forClass(Long.class);
         ArgumentCaptor<Long> parentAccountIdCaptor = ArgumentCaptor.forClass(Long.class);
-        verify(studentRepository).findByIdAndParentAccountId(studentIdCaptor.capture(), parentAccountIdCaptor.capture());
+        verify(studentRepository).findByIdAndParentAccountIdAndDeactivatedAtIsNull(studentIdCaptor.capture(), parentAccountIdCaptor.capture());
         assertThat(studentIdCaptor.getValue()).isEqualTo(1L);
         assertThat(parentAccountIdCaptor.getValue()).isEqualTo(42L);
         assertThat(result).contains(student);
@@ -255,7 +256,7 @@ class StudentServiceTest {
         Optional<Student> result = studentService.findOneForParent(SUBJECT, 1L);
 
         assertThat(result).isEmpty();
-        verify(studentRepository, never()).findByIdAndParentAccountId(any(), any());
+        verify(studentRepository, never()).findByIdAndParentAccountIdAndDeactivatedAtIsNull(any(), any());
     }
 
     @Test
@@ -263,7 +264,7 @@ class StudentServiceTest {
         ParentAccount account = new ParentAccount(SUBJECT, "parent@example.com", "Ada", "Lovelace");
         setId(account, 42L);
         when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(account));
-        when(studentRepository.findByIdAndParentAccountId(999L, 42L)).thenReturn(Optional.empty());
+        when(studentRepository.findByIdAndParentAccountIdAndDeactivatedAtIsNull(999L, 42L)).thenReturn(Optional.empty());
 
         Optional<Student> result = studentService.findOneForParent(SUBJECT, 999L);
 
@@ -275,12 +276,12 @@ class StudentServiceTest {
         ParentAccount otherParent = new ParentAccount(OTHER_SUBJECT, "other@example.com", "Grace", "Hopper");
         setId(otherParent, 99L);
         when(parentAccountService.findByExternalSubject(OTHER_SUBJECT)).thenReturn(Optional.of(otherParent));
-        when(studentRepository.findByIdAndParentAccountId(1L, 99L)).thenReturn(Optional.empty());
+        when(studentRepository.findByIdAndParentAccountIdAndDeactivatedAtIsNull(1L, 99L)).thenReturn(Optional.empty());
 
         Optional<Student> result = studentService.findOneForParent(OTHER_SUBJECT, 1L);
 
         assertThat(result).isEmpty();
-        verify(studentRepository).findByIdAndParentAccountId(1L, 99L);
+        verify(studentRepository).findByIdAndParentAccountIdAndDeactivatedAtIsNull(1L, 99L);
     }
 
     // --- update student for the authenticated parent ---
@@ -292,7 +293,7 @@ class StudentServiceTest {
         Student student = new Student(42L, "Aarav", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
         setStudentId(student, 1L);
         when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(account));
-        when(studentRepository.findByIdAndParentAccountId(1L, 42L)).thenReturn(Optional.of(student));
+        when(studentRepository.findByIdAndParentAccountIdAndDeactivatedAtIsNull(1L, 42L)).thenReturn(Optional.of(student));
         when(studentRepository.existsByParentAccountIdAndFirstNameAndSchoolYearAndPreparationGoalAndIdNot(
                 any(), any(), any(), any(), any())).thenReturn(false);
         when(studentRepository.saveAndFlush(any(Student.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -311,7 +312,7 @@ class StudentServiceTest {
         Student student = new Student(42L, "Aarav", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
         setStudentId(student, 1L);
         when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(account));
-        when(studentRepository.findByIdAndParentAccountId(1L, 42L)).thenReturn(Optional.of(student));
+        when(studentRepository.findByIdAndParentAccountIdAndDeactivatedAtIsNull(1L, 42L)).thenReturn(Optional.of(student));
         when(studentRepository.existsByParentAccountIdAndFirstNameAndSchoolYearAndPreparationGoalAndIdNot(
                 any(), any(), any(), any(), any())).thenReturn(false);
         when(studentRepository.saveAndFlush(any(Student.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -331,7 +332,7 @@ class StudentServiceTest {
         Student student = new Student(42L, "Aarav", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
         setStudentId(student, 1L);
         when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(account));
-        when(studentRepository.findByIdAndParentAccountId(1L, 42L)).thenReturn(Optional.of(student));
+        when(studentRepository.findByIdAndParentAccountIdAndDeactivatedAtIsNull(1L, 42L)).thenReturn(Optional.of(student));
         when(studentRepository.existsByParentAccountIdAndFirstNameAndSchoolYearAndPreparationGoalAndIdNot(
                 any(), any(), any(), any(), any())).thenReturn(false);
         when(studentRepository.saveAndFlush(any(Student.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -351,7 +352,7 @@ class StudentServiceTest {
         Student student = new Student(42L, "Aarav", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
         setStudentId(student, 1L);
         when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(account));
-        when(studentRepository.findByIdAndParentAccountId(1L, 42L)).thenReturn(Optional.of(student));
+        when(studentRepository.findByIdAndParentAccountIdAndDeactivatedAtIsNull(1L, 42L)).thenReturn(Optional.of(student));
         when(studentRepository.existsByParentAccountIdAndFirstNameAndSchoolYearAndPreparationGoalAndIdNot(
                 any(), any(), any(), any(), any())).thenReturn(false);
         when(studentRepository.saveAndFlush(any(Student.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -371,7 +372,7 @@ class StudentServiceTest {
         Student student = new Student(42L, "Aarav", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
         setStudentId(student, 1L);
         when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(account));
-        when(studentRepository.findByIdAndParentAccountId(1L, 42L)).thenReturn(Optional.of(student));
+        when(studentRepository.findByIdAndParentAccountIdAndDeactivatedAtIsNull(1L, 42L)).thenReturn(Optional.of(student));
         when(studentRepository.existsByParentAccountIdAndFirstNameAndSchoolYearAndPreparationGoalAndIdNot(
                 any(), any(), any(), any(), any())).thenReturn(false);
         when(studentRepository.saveAndFlush(any(Student.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -392,7 +393,7 @@ class StudentServiceTest {
         Student student = new Student(42L, "Aarav", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
         setStudentId(student, 1L);
         when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(account));
-        when(studentRepository.findByIdAndParentAccountId(1L, 42L)).thenReturn(Optional.of(student));
+        when(studentRepository.findByIdAndParentAccountIdAndDeactivatedAtIsNull(1L, 42L)).thenReturn(Optional.of(student));
         when(studentRepository.existsByParentAccountIdAndFirstNameAndSchoolYearAndPreparationGoalAndIdNot(
                 any(), any(), any(), any(), any())).thenReturn(false);
         when(studentRepository.saveAndFlush(any(Student.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -412,7 +413,7 @@ class StudentServiceTest {
         Student student = new Student(42L, "Aarav", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
         setStudentId(student, 1L);
         when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(account));
-        when(studentRepository.findByIdAndParentAccountId(1L, 42L)).thenReturn(Optional.of(student));
+        when(studentRepository.findByIdAndParentAccountIdAndDeactivatedAtIsNull(1L, 42L)).thenReturn(Optional.of(student));
 
         assertThatThrownBy(() -> studentService.updateForParent(SUBJECT, 1L, null, "YEAR_9", null))
                 .isInstanceOf(ResponseStatusException.class)
@@ -430,7 +431,7 @@ class StudentServiceTest {
         Student student = new Student(42L, "Aarav", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
         setStudentId(student, 1L);
         when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(account));
-        when(studentRepository.findByIdAndParentAccountId(1L, 42L)).thenReturn(Optional.of(student));
+        when(studentRepository.findByIdAndParentAccountIdAndDeactivatedAtIsNull(1L, 42L)).thenReturn(Optional.of(student));
 
         assertThatThrownBy(() -> studentService.updateForParent(SUBJECT, 1L, null, null, "UNKNOWN_GOAL"))
                 .isInstanceOf(ResponseStatusException.class)
@@ -446,7 +447,7 @@ class StudentServiceTest {
         Optional<Student> result = studentService.updateForParent(SUBJECT, 1L, "Priya", null, null);
 
         assertThat(result).isEmpty();
-        verify(studentRepository, never()).findByIdAndParentAccountId(any(), any());
+        verify(studentRepository, never()).findByIdAndParentAccountIdAndDeactivatedAtIsNull(any(), any());
     }
 
     @Test
@@ -454,7 +455,7 @@ class StudentServiceTest {
         ParentAccount account = new ParentAccount(SUBJECT, "parent@example.com", "Ada", "Lovelace");
         setId(account, 42L);
         when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(account));
-        when(studentRepository.findByIdAndParentAccountId(999L, 42L)).thenReturn(Optional.empty());
+        when(studentRepository.findByIdAndParentAccountIdAndDeactivatedAtIsNull(999L, 42L)).thenReturn(Optional.empty());
 
         Optional<Student> result = studentService.updateForParent(SUBJECT, 999L, "Priya", null, null);
 
@@ -467,12 +468,12 @@ class StudentServiceTest {
         ParentAccount otherParent = new ParentAccount(OTHER_SUBJECT, "other@example.com", "Grace", "Hopper");
         setId(otherParent, 99L);
         when(parentAccountService.findByExternalSubject(OTHER_SUBJECT)).thenReturn(Optional.of(otherParent));
-        when(studentRepository.findByIdAndParentAccountId(1L, 99L)).thenReturn(Optional.empty());
+        when(studentRepository.findByIdAndParentAccountIdAndDeactivatedAtIsNull(1L, 99L)).thenReturn(Optional.empty());
 
         Optional<Student> result = studentService.updateForParent(OTHER_SUBJECT, 1L, "Priya", null, null);
 
         assertThat(result).isEmpty();
-        verify(studentRepository).findByIdAndParentAccountId(1L, 99L);
+        verify(studentRepository).findByIdAndParentAccountIdAndDeactivatedAtIsNull(1L, 99L);
         verify(studentRepository, never()).saveAndFlush(any());
     }
 
@@ -483,7 +484,7 @@ class StudentServiceTest {
         Student student = new Student(42L, "Aarav", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
         setStudentId(student, 1L);
         when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(account));
-        when(studentRepository.findByIdAndParentAccountId(1L, 42L)).thenReturn(Optional.of(student));
+        when(studentRepository.findByIdAndParentAccountIdAndDeactivatedAtIsNull(1L, 42L)).thenReturn(Optional.of(student));
         when(studentRepository.existsByParentAccountIdAndFirstNameAndSchoolYearAndPreparationGoalAndIdNot(
                 eq(42L), eq("Priya"), eq(SchoolYear.YEAR_5), eq(PreparationGoal.SELECTIVE_MATHEMATICS), eq(1L)))
                 .thenReturn(true);
@@ -503,7 +504,7 @@ class StudentServiceTest {
         Student student = new Student(42L, "Aarav", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
         setStudentId(student, 1L);
         when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(account));
-        when(studentRepository.findByIdAndParentAccountId(1L, 42L)).thenReturn(Optional.of(student));
+        when(studentRepository.findByIdAndParentAccountIdAndDeactivatedAtIsNull(1L, 42L)).thenReturn(Optional.of(student));
         when(studentRepository.existsByParentAccountIdAndFirstNameAndSchoolYearAndPreparationGoalAndIdNot(
                 any(), any(), any(), any(), any())).thenReturn(false);
         when(studentRepository.saveAndFlush(any(Student.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -523,7 +524,7 @@ class StudentServiceTest {
         Student student = new Student(42L, "Aarav", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
         setStudentId(student, 1L);
         when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(account));
-        when(studentRepository.findByIdAndParentAccountId(1L, 42L)).thenReturn(Optional.of(student));
+        when(studentRepository.findByIdAndParentAccountIdAndDeactivatedAtIsNull(1L, 42L)).thenReturn(Optional.of(student));
         when(studentRepository.existsByParentAccountIdAndFirstNameAndSchoolYearAndPreparationGoalAndIdNot(
                 any(), any(), any(), any(), any())).thenReturn(false);
         when(studentRepository.saveAndFlush(any(Student.class)))
@@ -541,7 +542,7 @@ class StudentServiceTest {
         Student student = new Student(42L, "Aarav", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
         setStudentId(student, 1L);
         when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(account));
-        when(studentRepository.findByIdAndParentAccountId(1L, 42L)).thenReturn(Optional.of(student));
+        when(studentRepository.findByIdAndParentAccountIdAndDeactivatedAtIsNull(1L, 42L)).thenReturn(Optional.of(student));
         when(studentRepository.existsByParentAccountIdAndFirstNameAndSchoolYearAndPreparationGoalAndIdNot(
                 any(), any(), any(), any(), any())).thenReturn(false);
         when(studentRepository.saveAndFlush(any(Student.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -551,6 +552,191 @@ class StudentServiceTest {
         assertThat(result).isPresent();
         assertThat(result.get().getCreatedAt()).isEqualTo(student.getCreatedAt());
         assertThat(result.get().getParentAccountId()).isEqualTo(42L);
+    }
+
+    // --- deactivated students are excluded from active-only lookups (EP-06.9) ---
+
+    @Test
+    void aDeactivatedStudentIsNotReturnedByGetOne() {
+        ParentAccount account = new ParentAccount(SUBJECT, "parent@example.com", "Ada", "Lovelace");
+        setId(account, 42L);
+        when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(account));
+        when(studentRepository.findByIdAndParentAccountIdAndDeactivatedAtIsNull(1L, 42L)).thenReturn(Optional.empty());
+
+        Optional<Student> result = studentService.findOneForParent(SUBJECT, 1L);
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    void aDeactivatedStudentCannotBeUpdated() {
+        ParentAccount account = new ParentAccount(SUBJECT, "parent@example.com", "Ada", "Lovelace");
+        setId(account, 42L);
+        when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(account));
+        when(studentRepository.findByIdAndParentAccountIdAndDeactivatedAtIsNull(1L, 42L)).thenReturn(Optional.empty());
+
+        Optional<Student> result = studentService.updateForParent(SUBJECT, 1L, "Priya", null, null);
+
+        assertThat(result).isEmpty();
+        verify(studentRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void aDeactivatedStudentIsExcludedFromTheList() {
+        ParentAccount account = new ParentAccount(SUBJECT, "parent@example.com", "Ada", "Lovelace");
+        setId(account, 42L);
+        Student active = new Student(42L, "Aarav", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
+        when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(account));
+        when(studentRepository.findByParentAccountIdAndDeactivatedAtIsNullOrderByIdAsc(42L)).thenReturn(List.of(active));
+
+        Optional<List<Student>> result = studentService.findAllForParent(SUBJECT);
+
+        assertThat(result).isPresent();
+        assertThat(result.get()).containsExactly(active);
+    }
+
+    // --- deactivate student for the authenticated parent (EP-06.9) ---
+
+    @Test
+    void resolvesParentByTheAuthenticatedExternalSubjectWhenDeactivating() {
+        ParentAccount account = new ParentAccount(SUBJECT, "parent@example.com", "Ada", "Lovelace");
+        setId(account, 42L);
+        Student student = new Student(42L, "Aarav", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
+        setStudentId(student, 1L);
+        when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(account));
+        when(studentRepository.findByIdAndParentAccountId(1L, 42L)).thenReturn(Optional.of(student));
+        when(studentRepository.saveAndFlush(any(Student.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        studentService.deactivateForParent(SUBJECT, 1L);
+
+        verify(parentAccountService).findByExternalSubject(SUBJECT);
+    }
+
+    @Test
+    void ownerCanDeactivateOwnActiveStudent() {
+        ParentAccount account = new ParentAccount(SUBJECT, "parent@example.com", "Ada", "Lovelace");
+        setId(account, 42L);
+        Student student = new Student(42L, "Aarav", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
+        setStudentId(student, 1L);
+        when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(account));
+        when(studentRepository.findByIdAndParentAccountId(1L, 42L)).thenReturn(Optional.of(student));
+        when(studentRepository.saveAndFlush(any(Student.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        Optional<Student> result = studentService.deactivateForParent(SUBJECT, 1L);
+
+        assertThat(result).isPresent();
+        assertThat(result.get().getDeactivatedAt()).isNotNull();
+        verify(studentRepository).saveAndFlush(student);
+    }
+
+    @Test
+    void repeatedDeactivationOfAnAlreadyDeactivatedStudentIsIdempotentAndDoesNotPersistAgain() {
+        ParentAccount account = new ParentAccount(SUBJECT, "parent@example.com", "Ada", "Lovelace");
+        setId(account, 42L);
+        Student student = new Student(42L, "Aarav", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
+        setStudentId(student, 1L);
+        student.deactivate();
+        LocalDateTime firstDeactivatedAt = student.getDeactivatedAt();
+        when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(account));
+        when(studentRepository.findByIdAndParentAccountId(1L, 42L)).thenReturn(Optional.of(student));
+
+        Optional<Student> result = studentService.deactivateForParent(SUBJECT, 1L);
+
+        assertThat(result).isPresent();
+        assertThat(result.get().getDeactivatedAt()).isEqualTo(firstDeactivatedAt);
+        verify(studentRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void aStudentBelongingToAnotherParentCannotBeDeactivated() {
+        ParentAccount otherParent = new ParentAccount(OTHER_SUBJECT, "other@example.com", "Grace", "Hopper");
+        setId(otherParent, 99L);
+        when(parentAccountService.findByExternalSubject(OTHER_SUBJECT)).thenReturn(Optional.of(otherParent));
+        when(studentRepository.findByIdAndParentAccountId(1L, 99L)).thenReturn(Optional.empty());
+
+        Optional<Student> result = studentService.deactivateForParent(OTHER_SUBJECT, 1L);
+
+        assertThat(result).isEmpty();
+        verify(studentRepository).findByIdAndParentAccountId(1L, 99L);
+        verify(studentRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void returnsEmptyOptionalWhenNoParentAccountExistsForDeactivation() {
+        when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.empty());
+
+        Optional<Student> result = studentService.deactivateForParent(SUBJECT, 1L);
+
+        assertThat(result).isEmpty();
+        verify(studentRepository, never()).findByIdAndParentAccountId(any(), any());
+    }
+
+    @Test
+    void returnsEmptyWhenTheStudentToDeactivateDoesNotExist() {
+        ParentAccount account = new ParentAccount(SUBJECT, "parent@example.com", "Ada", "Lovelace");
+        setId(account, 42L);
+        when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(account));
+        when(studentRepository.findByIdAndParentAccountId(999L, 42L)).thenReturn(Optional.empty());
+
+        Optional<Student> result = studentService.deactivateForParent(SUBJECT, 999L);
+
+        assertThat(result).isEmpty();
+        verify(studentRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void deactivationUsesTheUnfilteredOwnershipLookupSoAnAlreadyDeactivatedOwnStudentIsStillFound() {
+        ParentAccount account = new ParentAccount(SUBJECT, "parent@example.com", "Ada", "Lovelace");
+        setId(account, 42L);
+        Student student = new Student(42L, "Aarav", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
+        setStudentId(student, 1L);
+        when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(account));
+        when(studentRepository.findByIdAndParentAccountId(1L, 42L)).thenReturn(Optional.of(student));
+        when(studentRepository.saveAndFlush(any(Student.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        studentService.deactivateForParent(SUBJECT, 1L);
+
+        verify(studentRepository).findByIdAndParentAccountId(1L, 42L);
+        verify(studentRepository, never()).findByIdAndParentAccountIdAndDeactivatedAtIsNull(any(), any());
+    }
+
+    @Test
+    void deactivationNeverPhysicallyDeletesTheStudentRow() {
+        ParentAccount account = new ParentAccount(SUBJECT, "parent@example.com", "Ada", "Lovelace");
+        setId(account, 42L);
+        Student student = new Student(42L, "Aarav", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
+        setStudentId(student, 1L);
+        when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(account));
+        when(studentRepository.findByIdAndParentAccountId(1L, 42L)).thenReturn(Optional.of(student));
+        when(studentRepository.saveAndFlush(any(Student.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        studentService.deactivateForParent(SUBJECT, 1L);
+
+        verify(studentRepository, never()).deleteById(any());
+        verify(studentRepository, never()).delete(any());
+    }
+
+    // --- duplicate rule is unchanged by deactivation (EP-06.9 accepted MVP limitation) ---
+
+    @Test
+    void createStillBlocksRecreatingAnIdenticalStudentEvenIfTheMatchingRowIsDeactivated() {
+        ParentAccount account = new ParentAccount(SUBJECT, "parent@example.com", "Ada", "Lovelace");
+        setId(account, 42L);
+        when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(account));
+        // existsByParentAccountIdAndFirstNameAndSchoolYearAndPreparationGoal is
+        // deliberately unchanged by EP-06.9 - it has no deactivated_at
+        // predicate, so it still reports true for a matching row regardless
+        // of that row's lifecycle state. A deactivated student therefore
+        // still blocks recreation of an identical profile in this MVP.
+        when(studentRepository.existsByParentAccountIdAndFirstNameAndSchoolYearAndPreparationGoal(
+                eq(42L), eq("Aarav"), eq(SchoolYear.YEAR_5), eq(PreparationGoal.SELECTIVE_MATHEMATICS)))
+                .thenReturn(true);
+
+        assertThatThrownBy(() -> studentService.create(SUBJECT, "Aarav", "YEAR_5", "SELECTIVE_MATHEMATICS"))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(ex -> assertThat(((ResponseStatusException) ex).getStatusCode().value()).isEqualTo(409));
+
+        verify(studentRepository, never()).saveAndFlush(any());
     }
 
     private static void setId(ParentAccount account, Long id) {
