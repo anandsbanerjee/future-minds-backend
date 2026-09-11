@@ -9,6 +9,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -74,6 +75,32 @@ public class StudentController {
     public ResponseEntity<StudentResponse> getMyStudent(@AuthenticationPrincipal Jwt jwt,
                                                           @PathVariable Long studentId) {
         Student student = studentService.findOneForParent(jwt.getSubject(), studentId)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND, "Student not found."));
+
+        return ResponseEntity.ok(StudentResponse.from(student));
+    }
+
+    /**
+     * Application-owned profile edit - identity is taken solely from the
+     * validated JWT subject and combined with the path studentId in the same
+     * ownership-scoped repository query used by getMyStudent, so a caller can
+     * never update another parent's student. The request body carries only
+     * editable student attributes, never a parent/owner identifier. A 404 is
+     * returned whether the student doesn't exist, belongs to another parent,
+     * or no Future Minds parent account exists for the subject - the
+     * response never reveals which.
+     */
+    @PatchMapping("/{studentId}")
+    public ResponseEntity<StudentResponse> updateMyStudent(@AuthenticationPrincipal Jwt jwt,
+                                                             @PathVariable Long studentId,
+                                                             @Valid @RequestBody UpdateStudentRequest request) {
+        Student student = studentService.updateForParent(
+                        jwt.getSubject(),
+                        studentId,
+                        request.firstName(),
+                        request.schoolYear(),
+                        request.preparationGoal())
                 .orElseThrow(() -> new ResponseStatusException(
                         HttpStatus.NOT_FOUND, "Student not found."));
 

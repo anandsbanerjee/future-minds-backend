@@ -90,6 +90,59 @@ public class StudentService {
                 .flatMap(account -> studentRepository.findByIdAndParentAccountId(studentId, account.getId()));
     }
 
+    /**
+     * Application-owned profile edit, entirely separate from creation.
+     * Ownership is enforced by the same findByIdAndParentAccountId lookup
+     * findOneForParent uses - never findById followed by a Java-side
+     * ownership check - so a student belonging to another parent is
+     * indistinguishable from a non-existent one here too. Only fields that
+     * actually change are mutated via Student's own equality-guarded
+     * mutators, so a true no-op update dirties nothing. saveAndFlush is
+     * still called (mirroring create's race-recovery approach) purely to
+     * force the flush inside this method's try/catch - without it, a
+     * concurrent racing update would only fail at transaction commit, past
+     * this method's own exception handling, and surface as an unmapped 500
+     * instead of the same 409 create returns for the same race; Hibernate
+     * still emits no UPDATE at all when nothing was actually mutated, so
+     * updatedAt is never bumped by a no-op call.
+     * <p>
+     * The duplicate check mirrors create's, but excludes the student's own
+     * id so an unchanged (or changed-back-to-itself) record never collides
+     * with itself; changing the effective firstName/schoolYear/
+     * preparationGoal onto a different existing student for the same parent
+     * still results in the same 409 as create. The unique constraint remains
+     * the authority of last resort for a concurrent racing update.
+     */
+    @Transactional
+    public Optional<Student> updateForParent(String externalSubject, Long studentId,
+                                              String firstName, String schoolYear, String preparationGoal) {
+        return parentAccountService.findByExternalSubject(externalSubject)
+                .flatMap(account -> studentRepository.findByIdAndParentAccountId(studentId, account.getId()))
+                .map(student -> applyUpdate(student, firstName, schoolYear, preparationGoal));
+    }
+
+    private Student applyUpdate(Student student, String firstName, String schoolYear, String preparationGoal) {
+        String effectiveFirstName = firstName != null ? firstName : student.getFirstName();
+        SchoolYear effectiveSchoolYear = schoolYear != null ? resolveSchoolYear(schoolYear) : student.getSchoolYear();
+        PreparationGoal effectivePreparationGoal = preparationGoal != null
+                ? resolvePreparationGoal(preparationGoal) : student.getPreparationGoal();
+
+        if (studentRepository.existsByParentAccountIdAndFirstNameAndSchoolYearAndPreparationGoalAndIdNot(
+                student.getParentAccountId(), effectiveFirstName, effectiveSchoolYear, effectivePreparationGoal, student.getId())) {
+            throw duplicateStudentException();
+        }
+
+        student.updateFirstName(effectiveFirstName);
+        student.updateSchoolYear(effectiveSchoolYear);
+        student.updatePreparationGoal(effectivePreparationGoal);
+
+        try {
+            return studentRepository.saveAndFlush(student);
+        } catch (DataIntegrityViolationException raceLost) {
+            throw duplicateStudentException();
+        }
+    }
+
     private ResponseStatusException duplicateStudentException() {
         return new ResponseStatusException(HttpStatus.CONFLICT,
                 "A student with this name, school year and preparation goal already exists for this parent.");

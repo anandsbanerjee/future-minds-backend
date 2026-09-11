@@ -30,6 +30,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -483,6 +484,299 @@ class StudentControllerTest {
                         .jwt(builder -> builder.subject(SUBJECT))
                         .authorities(new SimpleGrantedAuthority("ROLE_PARENT"))))
                 .andExpect(status().isNotFound());
+    }
+
+    // --- update student: security ---
+
+    @Test
+    void unauthenticatedUpdateRequestIsRejected() throws Exception {
+        mockMvc.perform(patch(getStudentUri(1L))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(updateBody("Priya", null, null)))
+                .andExpect(status().isUnauthorized());
+
+        verify(studentService, never()).updateForParent(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void authenticatedNonParentUpdateRequestIsForbidden() throws Exception {
+        mockMvc.perform(patch(getStudentUri(1L)).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_STUDENT")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(updateBody("Priya", null, null)))
+                .andExpect(status().isForbidden());
+
+        verify(studentService, never()).updateForParent(any(), any(), any(), any(), any());
+    }
+
+    // --- update student: behaviour ---
+
+    @Test
+    void ownerCanUpdateOwnStudentSuccessfully() throws Exception {
+        Student updated = student(1L, "Priya", SchoolYear.YEAR_5, PreparationGoal.YEAR_5_MATHEMATICS);
+        when(studentService.updateForParent(eq(SUBJECT), eq(1L), eq("Priya"), eq("YEAR_5"), eq("YEAR_5_MATHEMATICS")))
+                .thenReturn(Optional.of(updated));
+
+        mockMvc.perform(patch(getStudentUri(1L)).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(updateBody("Priya", "YEAR_5", "YEAR_5_MATHEMATICS")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(1))
+                .andExpect(jsonPath("$.firstName").value("Priya"))
+                .andExpect(jsonPath("$.schoolYear").value("YEAR_5"))
+                .andExpect(jsonPath("$.preparationGoal").value("YEAR_5_MATHEMATICS"));
+    }
+
+    @Test
+    void firstNameOnlyUpdateIsForwardedWithOtherFieldsNull() throws Exception {
+        Student updated = student(1L, "Priya", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
+        when(studentService.updateForParent(eq(SUBJECT), eq(1L), eq("Priya"), eq(null), eq(null)))
+                .thenReturn(Optional.of(updated));
+
+        mockMvc.perform(patch(getStudentUri(1L)).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(updateBody("Priya", null, null)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.firstName").value("Priya"));
+    }
+
+    @Test
+    void schoolYearOnlyUpdateIsForwardedWithOtherFieldsNull() throws Exception {
+        Student updated = student(1L, "Aarav", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
+        when(studentService.updateForParent(eq(SUBJECT), eq(1L), eq(null), eq("YEAR_5"), eq(null)))
+                .thenReturn(Optional.of(updated));
+
+        mockMvc.perform(patch(getStudentUri(1L)).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(updateBody(null, "YEAR_5", null)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.schoolYear").value("YEAR_5"));
+    }
+
+    @Test
+    void preparationGoalOnlyUpdateIsForwardedWithOtherFieldsNull() throws Exception {
+        Student updated = student(1L, "Aarav", SchoolYear.YEAR_5, PreparationGoal.YEAR_5_MATHEMATICS);
+        when(studentService.updateForParent(eq(SUBJECT), eq(1L), eq(null), eq(null), eq("YEAR_5_MATHEMATICS")))
+                .thenReturn(Optional.of(updated));
+
+        mockMvc.perform(patch(getStudentUri(1L)).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(updateBody(null, null, "YEAR_5_MATHEMATICS")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.preparationGoal").value("YEAR_5_MATHEMATICS"));
+    }
+
+    @Test
+    void unchangedValuesOnUpdateAreAccepted() throws Exception {
+        Student unchanged = student(1L, "Aarav", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
+        when(studentService.updateForParent(eq(SUBJECT), eq(1L), eq("Aarav"), eq("YEAR_5"), eq("SELECTIVE_MATHEMATICS")))
+                .thenReturn(Optional.of(unchanged));
+
+        mockMvc.perform(patch(getStudentUri(1L)).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(updateBody("Aarav", "YEAR_5", "SELECTIVE_MATHEMATICS")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.firstName").value("Aarav"));
+    }
+
+    @Test
+    void emptyUpdateRequestBodyIsAcceptedAsANoOp() throws Exception {
+        Student unchanged = student(1L, "Aarav", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
+        when(studentService.updateForParent(eq(SUBJECT), eq(1L), eq(null), eq(null), eq(null)))
+                .thenReturn(Optional.of(unchanged));
+
+        mockMvc.perform(patch(getStudentUri(1L)).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.firstName").value("Aarav"));
+    }
+
+    // --- update student: validation ---
+
+    @Test
+    void blankFirstNameOnUpdateReturnsBadRequest() throws Exception {
+        mockMvc.perform(patch(getStudentUri(1L)).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(updateBody("   ", null, null)))
+                .andExpect(status().isBadRequest());
+
+        verify(studentService, never()).updateForParent(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void unsupportedSchoolYearOnUpdateReturnsBadRequest() throws Exception {
+        when(studentService.updateForParent(eq(SUBJECT), eq(1L), eq(null), eq("YEAR_9"), eq(null)))
+                .thenThrow(new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported school year."));
+
+        mockMvc.perform(patch(getStudentUri(1L)).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(updateBody(null, "YEAR_9", null)))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void unsupportedPreparationGoalOnUpdateReturnsBadRequest() throws Exception {
+        when(studentService.updateForParent(eq(SUBJECT), eq(1L), eq(null), eq(null), eq("UNKNOWN_GOAL")))
+                .thenThrow(new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported preparation goal."));
+
+        mockMvc.perform(patch(getStudentUri(1L)).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(updateBody(null, null, "UNKNOWN_GOAL")))
+                .andExpect(status().isBadRequest());
+    }
+
+    // --- update student: missing/other-parent student ---
+
+    @Test
+    void updatingANonexistentStudentReturnsNotFound() throws Exception {
+        when(studentService.updateForParent(eq(SUBJECT), eq(999L), any(), any(), any()))
+                .thenReturn(Optional.empty());
+
+        mockMvc.perform(patch(getStudentUri(999L)).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(updateBody("Priya", null, null)))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void updatingAnotherParentsStudentReturnsNotFound() throws Exception {
+        when(studentService.updateForParent(eq(OTHER_SUBJECT), eq(1L), any(), any(), any()))
+                .thenReturn(Optional.empty());
+
+        mockMvc.perform(patch(getStudentUri(1L)).with(jwt()
+                        .jwt(builder -> builder.subject(OTHER_SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(updateBody("Priya", null, null)))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void missingFutureMindsParentAccountReturnsNotFoundWhenUpdatingAStudent() throws Exception {
+        when(studentService.updateForParent(eq(SUBJECT), eq(1L), any(), any(), any()))
+                .thenReturn(Optional.empty());
+
+        mockMvc.perform(patch(getStudentUri(1L)).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(updateBody("Priya", null, null)))
+                .andExpect(status().isNotFound());
+    }
+
+    // --- update student: ownership tampering ---
+
+    @Test
+    void updateRequestCannotInjectOwnershipViaTheRequestBody() throws Exception {
+        Student updated = student(1L, "Priya", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
+        when(studentService.updateForParent(eq(SUBJECT), eq(1L), eq("Priya"), eq(null), eq(null)))
+                .thenReturn(Optional.of(updated));
+
+        mockMvc.perform(patch(getStudentUri(1L)).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "firstName": "Priya",
+                                  "parentId": 999999,
+                                  "parentAccountId": 999999,
+                                  "ownerId": 999999,
+                                  "externalSubject": "attacker-controlled",
+                                  "subject": "attacker-controlled",
+                                  "createdAt": "2000-01-01T00:00:00",
+                                  "updatedAt": "2000-01-01T00:00:00"
+                                }
+                                """))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<String> subjectCaptor = ArgumentCaptor.forClass(String.class);
+        verify(studentService).updateForParent(subjectCaptor.capture(), eq(1L), eq("Priya"), eq(null), eq(null));
+        assertThat(subjectCaptor.getValue()).isEqualTo(SUBJECT);
+    }
+
+    @Test
+    void updateResponseDoesNotExposeParentOwnershipIdentifiers() throws Exception {
+        Student updated = student(1L, "Priya", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
+        when(studentService.updateForParent(eq(SUBJECT), eq(1L), any(), any(), any()))
+                .thenReturn(Optional.of(updated));
+
+        mockMvc.perform(patch(getStudentUri(1L)).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(updateBody("Priya", null, null)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.parentAccountId").doesNotExist())
+                .andExpect(jsonPath("$.externalSubject").doesNotExist())
+                .andExpect(jsonPath("$.createdAt").doesNotExist())
+                .andExpect(jsonPath("$.updatedAt").doesNotExist());
+    }
+
+    // --- update student: duplicate ---
+
+    @Test
+    void updateCollidingWithADifferentStudentForTheSameParentReturnsConflict() throws Exception {
+        when(studentService.updateForParent(eq(SUBJECT), eq(1L), eq("Priya"), eq(null), eq(null)))
+                .thenThrow(new ResponseStatusException(HttpStatus.CONFLICT,
+                        "A student with this name, school year and preparation goal already exists for this parent."));
+
+        mockMvc.perform(patch(getStudentUri(1L)).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(updateBody("Priya", null, null)))
+                .andExpect(status().isConflict());
+    }
+
+    private static String updateBody(String firstName, String schoolYear, String preparationGoal) {
+        StringBuilder body = new StringBuilder("{");
+        boolean first = true;
+        if (firstName != null) {
+            body.append("\"firstName\": ").append(quoted(firstName));
+            first = false;
+        }
+        if (schoolYear != null) {
+            if (!first) {
+                body.append(", ");
+            }
+            body.append("\"schoolYear\": ").append(quoted(schoolYear));
+            first = false;
+        }
+        if (preparationGoal != null) {
+            if (!first) {
+                body.append(", ");
+            }
+            body.append("\"preparationGoal\": ").append(quoted(preparationGoal));
+        }
+        body.append("}");
+        return body.toString();
+    }
+
+    private static String quoted(String value) {
+        return "\"" + value + "\"";
     }
 
     private static String validBody() {

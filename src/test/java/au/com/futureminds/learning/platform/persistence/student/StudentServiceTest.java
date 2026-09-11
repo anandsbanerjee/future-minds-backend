@@ -283,11 +283,291 @@ class StudentServiceTest {
         verify(studentRepository).findByIdAndParentAccountId(1L, 99L);
     }
 
+    // --- update student for the authenticated parent ---
+
+    @Test
+    void ownerCanUpdateOwnStudentSuccessfully() {
+        ParentAccount account = new ParentAccount(SUBJECT, "parent@example.com", "Ada", "Lovelace");
+        setId(account, 42L);
+        Student student = new Student(42L, "Aarav", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
+        setStudentId(student, 1L);
+        when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(account));
+        when(studentRepository.findByIdAndParentAccountId(1L, 42L)).thenReturn(Optional.of(student));
+        when(studentRepository.existsByParentAccountIdAndFirstNameAndSchoolYearAndPreparationGoalAndIdNot(
+                any(), any(), any(), any(), any())).thenReturn(false);
+        when(studentRepository.saveAndFlush(any(Student.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        Optional<Student> result = studentService.updateForParent(SUBJECT, 1L, "Priya", "YEAR_5", "YEAR_5_MATHEMATICS");
+
+        assertThat(result).isPresent();
+        assertThat(result.get().getFirstName()).isEqualTo("Priya");
+        assertThat(result.get().getPreparationGoal()).isEqualTo(PreparationGoal.YEAR_5_MATHEMATICS);
+    }
+
+    @Test
+    void updatesOnlyFirstNameWhenOtherFieldsAreOmitted() {
+        ParentAccount account = new ParentAccount(SUBJECT, "parent@example.com", "Ada", "Lovelace");
+        setId(account, 42L);
+        Student student = new Student(42L, "Aarav", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
+        setStudentId(student, 1L);
+        when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(account));
+        when(studentRepository.findByIdAndParentAccountId(1L, 42L)).thenReturn(Optional.of(student));
+        when(studentRepository.existsByParentAccountIdAndFirstNameAndSchoolYearAndPreparationGoalAndIdNot(
+                any(), any(), any(), any(), any())).thenReturn(false);
+        when(studentRepository.saveAndFlush(any(Student.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        Optional<Student> result = studentService.updateForParent(SUBJECT, 1L, "Priya", null, null);
+
+        assertThat(result).isPresent();
+        assertThat(result.get().getFirstName()).isEqualTo("Priya");
+        assertThat(result.get().getSchoolYear()).isEqualTo(SchoolYear.YEAR_5);
+        assertThat(result.get().getPreparationGoal()).isEqualTo(PreparationGoal.SELECTIVE_MATHEMATICS);
+    }
+
+    @Test
+    void updatesOnlySchoolYearWhenOtherFieldsAreOmitted() {
+        ParentAccount account = new ParentAccount(SUBJECT, "parent@example.com", "Ada", "Lovelace");
+        setId(account, 42L);
+        Student student = new Student(42L, "Aarav", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
+        setStudentId(student, 1L);
+        when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(account));
+        when(studentRepository.findByIdAndParentAccountId(1L, 42L)).thenReturn(Optional.of(student));
+        when(studentRepository.existsByParentAccountIdAndFirstNameAndSchoolYearAndPreparationGoalAndIdNot(
+                any(), any(), any(), any(), any())).thenReturn(false);
+        when(studentRepository.saveAndFlush(any(Student.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        Optional<Student> result = studentService.updateForParent(SUBJECT, 1L, null, "YEAR_5", null);
+
+        assertThat(result).isPresent();
+        assertThat(result.get().getFirstName()).isEqualTo("Aarav");
+        assertThat(result.get().getSchoolYear()).isEqualTo(SchoolYear.YEAR_5);
+        assertThat(result.get().getPreparationGoal()).isEqualTo(PreparationGoal.SELECTIVE_MATHEMATICS);
+    }
+
+    @Test
+    void updatesOnlyPreparationGoalWhenOtherFieldsAreOmitted() {
+        ParentAccount account = new ParentAccount(SUBJECT, "parent@example.com", "Ada", "Lovelace");
+        setId(account, 42L);
+        Student student = new Student(42L, "Aarav", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
+        setStudentId(student, 1L);
+        when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(account));
+        when(studentRepository.findByIdAndParentAccountId(1L, 42L)).thenReturn(Optional.of(student));
+        when(studentRepository.existsByParentAccountIdAndFirstNameAndSchoolYearAndPreparationGoalAndIdNot(
+                any(), any(), any(), any(), any())).thenReturn(false);
+        when(studentRepository.saveAndFlush(any(Student.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        Optional<Student> result = studentService.updateForParent(SUBJECT, 1L, null, null, "YEAR_5_MATHEMATICS");
+
+        assertThat(result).isPresent();
+        assertThat(result.get().getFirstName()).isEqualTo("Aarav");
+        assertThat(result.get().getSchoolYear()).isEqualTo(SchoolYear.YEAR_5);
+        assertThat(result.get().getPreparationGoal()).isEqualTo(PreparationGoal.YEAR_5_MATHEMATICS);
+    }
+
+    @Test
+    void unchangedValuesAreAcceptedAsANoOp() {
+        ParentAccount account = new ParentAccount(SUBJECT, "parent@example.com", "Ada", "Lovelace");
+        setId(account, 42L);
+        Student student = new Student(42L, "Aarav", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
+        setStudentId(student, 1L);
+        when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(account));
+        when(studentRepository.findByIdAndParentAccountId(1L, 42L)).thenReturn(Optional.of(student));
+        when(studentRepository.existsByParentAccountIdAndFirstNameAndSchoolYearAndPreparationGoalAndIdNot(
+                any(), any(), any(), any(), any())).thenReturn(false);
+        when(studentRepository.saveAndFlush(any(Student.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        Optional<Student> result = studentService.updateForParent(
+                SUBJECT, 1L, "Aarav", "YEAR_5", "SELECTIVE_MATHEMATICS");
+
+        assertThat(result).isPresent();
+        assertThat(result.get().getFirstName()).isEqualTo("Aarav");
+        assertThat(result.get().getSchoolYear()).isEqualTo(SchoolYear.YEAR_5);
+        assertThat(result.get().getPreparationGoal()).isEqualTo(PreparationGoal.SELECTIVE_MATHEMATICS);
+    }
+
+    @Test
+    void emptyUpdateRequestIsAcceptedAsANoOp() {
+        ParentAccount account = new ParentAccount(SUBJECT, "parent@example.com", "Ada", "Lovelace");
+        setId(account, 42L);
+        Student student = new Student(42L, "Aarav", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
+        setStudentId(student, 1L);
+        when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(account));
+        when(studentRepository.findByIdAndParentAccountId(1L, 42L)).thenReturn(Optional.of(student));
+        when(studentRepository.existsByParentAccountIdAndFirstNameAndSchoolYearAndPreparationGoalAndIdNot(
+                any(), any(), any(), any(), any())).thenReturn(false);
+        when(studentRepository.saveAndFlush(any(Student.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        Optional<Student> result = studentService.updateForParent(SUBJECT, 1L, null, null, null);
+
+        assertThat(result).isPresent();
+        assertThat(result.get().getFirstName()).isEqualTo("Aarav");
+        assertThat(result.get().getSchoolYear()).isEqualTo(SchoolYear.YEAR_5);
+        assertThat(result.get().getPreparationGoal()).isEqualTo(PreparationGoal.SELECTIVE_MATHEMATICS);
+    }
+
+    @Test
+    void rejectsAnUnsupportedSchoolYearOnUpdateBeforeTouchingTheRepositoryDuplicateCheck() {
+        ParentAccount account = new ParentAccount(SUBJECT, "parent@example.com", "Ada", "Lovelace");
+        setId(account, 42L);
+        Student student = new Student(42L, "Aarav", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
+        setStudentId(student, 1L);
+        when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(account));
+        when(studentRepository.findByIdAndParentAccountId(1L, 42L)).thenReturn(Optional.of(student));
+
+        assertThatThrownBy(() -> studentService.updateForParent(SUBJECT, 1L, null, "YEAR_9", null))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(ex -> assertThat(((ResponseStatusException) ex).getStatusCode().value()).isEqualTo(400));
+
+        verify(studentRepository, never()).existsByParentAccountIdAndFirstNameAndSchoolYearAndPreparationGoalAndIdNot(
+                any(), any(), any(), any(), any());
+        verify(studentRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void rejectsAnUnsupportedPreparationGoalOnUpdateBeforeTouchingTheRepositoryDuplicateCheck() {
+        ParentAccount account = new ParentAccount(SUBJECT, "parent@example.com", "Ada", "Lovelace");
+        setId(account, 42L);
+        Student student = new Student(42L, "Aarav", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
+        setStudentId(student, 1L);
+        when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(account));
+        when(studentRepository.findByIdAndParentAccountId(1L, 42L)).thenReturn(Optional.of(student));
+
+        assertThatThrownBy(() -> studentService.updateForParent(SUBJECT, 1L, null, null, "UNKNOWN_GOAL"))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(ex -> assertThat(((ResponseStatusException) ex).getStatusCode().value()).isEqualTo(400));
+
+        verify(studentRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void doesNotQueryTheRepositoryWhenNoParentAccountExistsForUpdatingAStudent() {
+        when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.empty());
+
+        Optional<Student> result = studentService.updateForParent(SUBJECT, 1L, "Priya", null, null);
+
+        assertThat(result).isEmpty();
+        verify(studentRepository, never()).findByIdAndParentAccountId(any(), any());
+    }
+
+    @Test
+    void returnsEmptyWhenTheStudentToUpdateDoesNotExist() {
+        ParentAccount account = new ParentAccount(SUBJECT, "parent@example.com", "Ada", "Lovelace");
+        setId(account, 42L);
+        when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(account));
+        when(studentRepository.findByIdAndParentAccountId(999L, 42L)).thenReturn(Optional.empty());
+
+        Optional<Student> result = studentService.updateForParent(SUBJECT, 999L, "Priya", null, null);
+
+        assertThat(result).isEmpty();
+        verify(studentRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void aStudentBelongingToAnotherParentCannotBeUpdatedUsingOnlyItsId() {
+        ParentAccount otherParent = new ParentAccount(OTHER_SUBJECT, "other@example.com", "Grace", "Hopper");
+        setId(otherParent, 99L);
+        when(parentAccountService.findByExternalSubject(OTHER_SUBJECT)).thenReturn(Optional.of(otherParent));
+        when(studentRepository.findByIdAndParentAccountId(1L, 99L)).thenReturn(Optional.empty());
+
+        Optional<Student> result = studentService.updateForParent(OTHER_SUBJECT, 1L, "Priya", null, null);
+
+        assertThat(result).isEmpty();
+        verify(studentRepository).findByIdAndParentAccountId(1L, 99L);
+        verify(studentRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void updateCollidingWithADifferentStudentForTheSameParentReturnsConflict() {
+        ParentAccount account = new ParentAccount(SUBJECT, "parent@example.com", "Ada", "Lovelace");
+        setId(account, 42L);
+        Student student = new Student(42L, "Aarav", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
+        setStudentId(student, 1L);
+        when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(account));
+        when(studentRepository.findByIdAndParentAccountId(1L, 42L)).thenReturn(Optional.of(student));
+        when(studentRepository.existsByParentAccountIdAndFirstNameAndSchoolYearAndPreparationGoalAndIdNot(
+                eq(42L), eq("Priya"), eq(SchoolYear.YEAR_5), eq(PreparationGoal.SELECTIVE_MATHEMATICS), eq(1L)))
+                .thenReturn(true);
+
+        assertThatThrownBy(() -> studentService.updateForParent(SUBJECT, 1L, "Priya", null, null))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(ex -> assertThat(((ResponseStatusException) ex).getStatusCode().value()).isEqualTo(409));
+
+        verify(studentRepository, never()).saveAndFlush(any());
+        assertThat(student.getFirstName()).isEqualTo("Aarav");
+    }
+
+    @Test
+    void theDuplicateCheckExcludesTheStudentsOwnId() {
+        ParentAccount account = new ParentAccount(SUBJECT, "parent@example.com", "Ada", "Lovelace");
+        setId(account, 42L);
+        Student student = new Student(42L, "Aarav", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
+        setStudentId(student, 1L);
+        when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(account));
+        when(studentRepository.findByIdAndParentAccountId(1L, 42L)).thenReturn(Optional.of(student));
+        when(studentRepository.existsByParentAccountIdAndFirstNameAndSchoolYearAndPreparationGoalAndIdNot(
+                any(), any(), any(), any(), any())).thenReturn(false);
+        when(studentRepository.saveAndFlush(any(Student.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        studentService.updateForParent(SUBJECT, 1L, "Aarav", "YEAR_5", "SELECTIVE_MATHEMATICS");
+
+        ArgumentCaptor<Long> idNotCaptor = ArgumentCaptor.forClass(Long.class);
+        verify(studentRepository).existsByParentAccountIdAndFirstNameAndSchoolYearAndPreparationGoalAndIdNot(
+                eq(42L), eq("Aarav"), eq(SchoolYear.YEAR_5), eq(PreparationGoal.SELECTIVE_MATHEMATICS), idNotCaptor.capture());
+        assertThat(idNotCaptor.getValue()).isEqualTo(1L);
+    }
+
+    @Test
+    void rejectsAConcurrentDuplicateUpdateThatRacesPastTheExistenceCheck() {
+        ParentAccount account = new ParentAccount(SUBJECT, "parent@example.com", "Ada", "Lovelace");
+        setId(account, 42L);
+        Student student = new Student(42L, "Aarav", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
+        setStudentId(student, 1L);
+        when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(account));
+        when(studentRepository.findByIdAndParentAccountId(1L, 42L)).thenReturn(Optional.of(student));
+        when(studentRepository.existsByParentAccountIdAndFirstNameAndSchoolYearAndPreparationGoalAndIdNot(
+                any(), any(), any(), any(), any())).thenReturn(false);
+        when(studentRepository.saveAndFlush(any(Student.class)))
+                .thenThrow(new DataIntegrityViolationException("duplicate key"));
+
+        assertThatThrownBy(() -> studentService.updateForParent(SUBJECT, 1L, "Priya", null, null))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(ex -> assertThat(((ResponseStatusException) ex).getStatusCode().value()).isEqualTo(409));
+    }
+
+    @Test
+    void updatePreservesCreatedAtAndParentAccountId() {
+        ParentAccount account = new ParentAccount(SUBJECT, "parent@example.com", "Ada", "Lovelace");
+        setId(account, 42L);
+        Student student = new Student(42L, "Aarav", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
+        setStudentId(student, 1L);
+        when(parentAccountService.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(account));
+        when(studentRepository.findByIdAndParentAccountId(1L, 42L)).thenReturn(Optional.of(student));
+        when(studentRepository.existsByParentAccountIdAndFirstNameAndSchoolYearAndPreparationGoalAndIdNot(
+                any(), any(), any(), any(), any())).thenReturn(false);
+        when(studentRepository.saveAndFlush(any(Student.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        Optional<Student> result = studentService.updateForParent(SUBJECT, 1L, "Priya", null, null);
+
+        assertThat(result).isPresent();
+        assertThat(result.get().getCreatedAt()).isEqualTo(student.getCreatedAt());
+        assertThat(result.get().getParentAccountId()).isEqualTo(42L);
+    }
+
     private static void setId(ParentAccount account, Long id) {
         try {
             var field = ParentAccount.class.getDeclaredField("id");
             field.setAccessible(true);
             field.set(account, id);
+        } catch (ReflectiveOperationException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private static void setStudentId(Student student, Long id) {
+        try {
+            var field = Student.class.getDeclaredField("id");
+            field.setAccessible(true);
+            field.set(student, id);
         } catch (ReflectiveOperationException e) {
             throw new RuntimeException(e);
         }
