@@ -27,6 +27,7 @@ class ParentAccountServiceTest {
             new ParentAccountService(parentAccountRepository, parentProfileAuditRepository, parentConsentRepository);
 
     private static final String SUBJECT = "keycloak-subject-123";
+    private static final String OTHER_SUBJECT = "keycloak-subject-xyz";
 
     // --- provisioning ---
 
@@ -376,5 +377,69 @@ class ParentAccountServiceTest {
         verify(parentConsentRepository, never()).saveAndFlush(any());
         verify(parentConsentRepository, never()).delete(any());
         verify(parentProfileAuditRepository, never()).saveAll(any());
+    }
+
+    // --- cross-parent consent isolation ---
+
+    @Test
+    void findCurrentConsentsForParentAQueriesOnlyParentAsInternallyResolvedParentAccountIdAndNeverReturnsParentBsConsents() {
+        ParentAccount parentA = new ParentAccount(SUBJECT, "a@example.com", "Ada", "Lovelace");
+        setId(parentA, 42L);
+        ParentAccount parentB = new ParentAccount(OTHER_SUBJECT, "b@example.com", "Grace", "Hopper");
+        setId(parentB, 99L);
+        ParentConsent parentAsConsent = new ParentConsent(42L, ParentConsentType.PRIVACY_POLICY, "v1");
+        ParentConsent parentBsConsent = new ParentConsent(99L, ParentConsentType.PRIVACY_POLICY, "v1");
+        when(parentAccountRepository.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(parentA));
+        when(parentConsentRepository.findByParentAccountIdOrderByRecordedAtDesc(42L))
+                .thenReturn(List.of(parentAsConsent));
+        when(parentConsentRepository.findByParentAccountIdOrderByRecordedAtDesc(99L))
+                .thenReturn(List.of(parentBsConsent));
+
+        Optional<List<ParentConsent>> result = parentAccountService.findCurrentConsents(SUBJECT);
+
+        assertThat(result).isPresent();
+        assertThat(result.get()).containsExactly(parentAsConsent);
+        assertThat(result.get()).doesNotContain(parentBsConsent);
+
+        ArgumentCaptor<Long> parentAccountIdCaptor = ArgumentCaptor.forClass(Long.class);
+        verify(parentConsentRepository).findByParentAccountIdOrderByRecordedAtDesc(parentAccountIdCaptor.capture());
+        assertThat(parentAccountIdCaptor.getValue()).isEqualTo(42L);
+        verify(parentConsentRepository, never()).findByParentAccountIdOrderByRecordedAtDesc(99L);
+    }
+
+    @Test
+    void recordingConsentAsParentACannotBeAttributedToOrAffectParentB() {
+        ParentAccount parentA = new ParentAccount(SUBJECT, "a@example.com", "Ada", "Lovelace");
+        setId(parentA, 42L);
+        ParentAccount parentB = new ParentAccount(OTHER_SUBJECT, "b@example.com", "Grace", "Hopper");
+        setId(parentB, 99L);
+        when(parentAccountRepository.findByExternalSubject(SUBJECT)).thenReturn(Optional.of(parentA));
+        when(parentAccountRepository.findByExternalSubject(OTHER_SUBJECT)).thenReturn(Optional.of(parentB));
+        when(parentConsentRepository.save(any(ParentConsent.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        parentAccountService.recordConsent(SUBJECT, "PRIVACY_POLICY", "v1");
+
+        ArgumentCaptor<ParentConsent> captor = ArgumentCaptor.forClass(ParentConsent.class);
+        verify(parentConsentRepository).save(captor.capture());
+        assertThat(captor.getValue().getParentAccountId()).isEqualTo(42L);
+        assertThat(captor.getValue().getParentAccountId()).isNotEqualTo(99L);
+
+        // Parent B's own consent history is queried independently and is
+        // untouched by A's recordConsent call above - no shared state, no
+        // write directed at B's parentAccountId.
+        when(parentConsentRepository.findByParentAccountIdOrderByRecordedAtDesc(99L)).thenReturn(List.of());
+        Optional<List<ParentConsent>> parentBsConsents = parentAccountService.findCurrentConsents(OTHER_SUBJECT);
+        assertThat(parentBsConsents).contains(List.of());
+    }
+
+    private static void setId(ParentAccount account, Long id) {
+        try {
+            var field = ParentAccount.class.getDeclaredField("id");
+            field.setAccessible(true);
+            field.set(account, id);
+        } catch (ReflectiveOperationException e) {
+            throw new RuntimeException(e);
+        }
     }
 }
