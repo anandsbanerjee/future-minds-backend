@@ -68,10 +68,12 @@ public class StudentService {
      * simply has no students yet, so the controller returns 200 [] rather
      * than 404. Students are returned in ID (creation) order for a
      * deterministic, predictable response without introducing sorting/paging.
+     * Deactivated students (EP-06.9) are excluded - a soft-deactivated
+     * student is never returned by the normal active-student APIs.
      */
     public Optional<List<Student>> findAllForParent(String externalSubject) {
         return parentAccountService.findByExternalSubject(externalSubject)
-                .map(account -> studentRepository.findByParentAccountIdOrderByIdAsc(account.getId()));
+                .map(account -> studentRepository.findByParentAccountIdAndDeactivatedAtIsNullOrderByIdAsc(account.getId()));
     }
 
     /**
@@ -83,19 +85,22 @@ public class StudentService {
      * parent is indistinguishable from a non-existent one. Empty Optional
      * covers all three cases the controller maps to 404: no Future Minds
      * parent account for the subject, no such student, or a student owned by
-     * a different parent.
+     * a different parent. A deactivated student (EP-06.9) is likewise folded
+     * into this same empty case - once deactivated, a student is
+     * indistinguishable from nonexistent through this lookup.
      */
     public Optional<Student> findOneForParent(String externalSubject, Long studentId) {
         return parentAccountService.findByExternalSubject(externalSubject)
-                .flatMap(account -> studentRepository.findByIdAndParentAccountId(studentId, account.getId()));
+                .flatMap(account -> studentRepository.findByIdAndParentAccountIdAndDeactivatedAtIsNull(studentId, account.getId()));
     }
 
     /**
      * Application-owned profile edit, entirely separate from creation.
-     * Ownership is enforced by the same findByIdAndParentAccountId lookup
+     * Ownership is enforced by the same active-only, ownership-scoped lookup
      * findOneForParent uses - never findById followed by a Java-side
-     * ownership check - so a student belonging to another parent is
-     * indistinguishable from a non-existent one here too. Only fields that
+     * ownership check - so a student belonging to another parent, or a
+     * student that has been deactivated (EP-06.9), is indistinguishable from
+     * a non-existent one here too. Only fields that
      * actually change are mutated via Student's own equality-guarded
      * mutators, so a true no-op update dirties nothing. saveAndFlush is
      * still called (mirroring create's race-recovery approach) purely to
@@ -117,7 +122,7 @@ public class StudentService {
     public Optional<Student> updateForParent(String externalSubject, Long studentId,
                                               String firstName, String schoolYear, String preparationGoal) {
         return parentAccountService.findByExternalSubject(externalSubject)
-                .flatMap(account -> studentRepository.findByIdAndParentAccountId(studentId, account.getId()))
+                .flatMap(account -> studentRepository.findByIdAndParentAccountIdAndDeactivatedAtIsNull(studentId, account.getId()))
                 .map(student -> applyUpdate(student, firstName, schoolYear, preparationGoal));
     }
 
@@ -141,6 +146,35 @@ public class StudentService {
         } catch (DataIntegrityViolationException raceLost) {
             throw duplicateStudentException();
         }
+    }
+
+    /**
+     * Soft deactivation only (EP-06.9) - never a physical delete. Ownership
+     * uses the unfiltered findByIdAndParentAccountId, not the active-only
+     * lookup findOneForParent/updateForParent use, so that a student the
+     * caller has already deactivated is still resolvable here - a repeat
+     * call must be able to find its own target rather than falling through
+     * to the not-found case. A student belonging to another parent is still
+     * indistinguishable from a non-existent one: the ownership predicate is
+     * unchanged, only the active-state filter is dropped for this one
+     * lookup. Student.deactivate() is itself idempotent (false, no mutation,
+     * if already deactivated), so a repeat call here is a safe no-op that
+     * still reports success - persistence is skipped entirely when no
+     * transition actually occurred, so a repeat call never re-stamps
+     * deactivatedAt or bumps updatedAt.
+     */
+    @Transactional
+    public Optional<Student> deactivateForParent(String externalSubject, Long studentId) {
+        return parentAccountService.findByExternalSubject(externalSubject)
+                .flatMap(account -> studentRepository.findByIdAndParentAccountId(studentId, account.getId()))
+                .map(this::deactivate);
+    }
+
+    private Student deactivate(Student student) {
+        if (student.deactivate()) {
+            return studentRepository.saveAndFlush(student);
+        }
+        return student;
     }
 
     private ResponseStatusException duplicateStudentException() {

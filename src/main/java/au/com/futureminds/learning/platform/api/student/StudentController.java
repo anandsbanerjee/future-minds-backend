@@ -8,6 +8,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -105,5 +106,26 @@ public class StudentController {
                         HttpStatus.NOT_FOUND, "Student not found."));
 
         return ResponseEntity.ok(StudentResponse.from(student));
+    }
+
+    /**
+     * Soft deactivation only (EP-06.9) - never a physical delete. Identity is
+     * taken solely from the validated JWT subject and combined with the path
+     * studentId in an ownership-scoped repository lookup, so a caller can
+     * never deactivate another parent's student. Idempotent: deactivating an
+     * already-deactivated student owned by the caller still returns 204,
+     * since Student.deactivate() is itself a safe no-op in that case. A 404
+     * is returned whether the student doesn't exist, belongs to another
+     * parent, or no Future Minds parent account exists for the subject - the
+     * response never reveals which.
+     */
+    @DeleteMapping("/{studentId}")
+    public ResponseEntity<Void> deactivateMyStudent(@AuthenticationPrincipal Jwt jwt,
+                                                      @PathVariable Long studentId) {
+        studentService.deactivateForParent(jwt.getSubject(), studentId)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND, "Student not found."));
+
+        return ResponseEntity.noContent().build();
     }
 }

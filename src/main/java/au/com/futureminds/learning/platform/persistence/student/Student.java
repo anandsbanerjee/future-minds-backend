@@ -40,6 +40,9 @@ public class Student {
     @Column(name = "updated_at", nullable = false, insertable = false, updatable = false)
     private LocalDateTime updatedAt;
 
+    @Column(name = "deactivated_at")
+    private LocalDateTime deactivatedAt;
+
     protected Student() {
     }
 
@@ -79,6 +82,20 @@ public class Student {
         return true;
     }
 
+    /**
+     * Soft deactivation only - never physically deleted. Idempotent: a
+     * second call on an already-deactivated student leaves deactivatedAt
+     * untouched and returns false, so a repeat DELETE can be treated as a
+     * no-op success rather than re-stamping the timestamp.
+     */
+    public boolean deactivate() {
+        if (deactivatedAt != null) {
+            return false;
+        }
+        this.deactivatedAt = LocalDateTime.now();
+        return true;
+    }
+
     public Long getId() {
         return id;
     }
@@ -105,5 +122,9 @@ public class Student {
 
     public LocalDateTime getUpdatedAt() {
         return updatedAt;
+    }
+
+    public LocalDateTime getDeactivatedAt() {
+        return deactivatedAt;
     }
 }

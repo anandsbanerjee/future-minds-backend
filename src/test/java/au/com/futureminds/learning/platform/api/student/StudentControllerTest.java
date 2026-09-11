@@ -29,6 +29,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -748,6 +749,158 @@ class StudentControllerTest {
                         .authorities(new SimpleGrantedAuthority("ROLE_PARENT")))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(updateBody("Priya", null, null)))
+                .andExpect(status().isConflict());
+    }
+
+    // --- deactivate student: security ---
+
+    @Test
+    void unauthenticatedDeactivateRequestIsRejected() throws Exception {
+        mockMvc.perform(delete(getStudentUri(1L)))
+                .andExpect(status().isUnauthorized());
+
+        verify(studentService, never()).deactivateForParent(any(), any());
+    }
+
+    @Test
+    void authenticatedNonParentDeactivateRequestIsForbidden() throws Exception {
+        mockMvc.perform(delete(getStudentUri(1L)).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_STUDENT"))))
+                .andExpect(status().isForbidden());
+
+        verify(studentService, never()).deactivateForParent(any(), any());
+    }
+
+    // --- deactivate student: behaviour ---
+
+    @Test
+    void ownerCanDeactivateOwnActiveStudent() throws Exception {
+        Student deactivated = student(1L, "Aarav", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
+        when(studentService.deactivateForParent(SUBJECT, 1L)).thenReturn(Optional.of(deactivated));
+
+        mockMvc.perform(delete(getStudentUri(1L)).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT"))))
+                .andExpect(status().isNoContent())
+                .andExpect(jsonPath("$").doesNotExist());
+    }
+
+    @Test
+    void repeatedDeactivationByTheOwnerReturnsNoContentAgain() throws Exception {
+        Student alreadyDeactivated = student(1L, "Aarav", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
+        when(studentService.deactivateForParent(SUBJECT, 1L)).thenReturn(Optional.of(alreadyDeactivated));
+
+        mockMvc.perform(delete(getStudentUri(1L)).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT"))))
+                .andExpect(status().isNoContent());
+        mockMvc.perform(delete(getStudentUri(1L)).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT"))))
+                .andExpect(status().isNoContent());
+
+        verify(studentService, org.mockito.Mockito.times(2)).deactivateForParent(SUBJECT, 1L);
+    }
+
+    @Test
+    void ownershipIsDerivedOnlyFromTheJwtSubjectWhenDeactivating() throws Exception {
+        Student deactivated = student(1L, "Aarav", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
+        when(studentService.deactivateForParent(SUBJECT, 1L)).thenReturn(Optional.of(deactivated));
+
+        mockMvc.perform(delete(getStudentUri(1L)).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT"))))
+                .andExpect(status().isNoContent());
+
+        ArgumentCaptor<String> subjectCaptor = ArgumentCaptor.forClass(String.class);
+        verify(studentService).deactivateForParent(subjectCaptor.capture(), eq(1L));
+        assertThat(subjectCaptor.getValue()).isEqualTo(SUBJECT);
+    }
+
+    // --- deactivate student: missing/other-parent student ---
+
+    @Test
+    void deactivatingANonexistentStudentReturnsNotFound() throws Exception {
+        when(studentService.deactivateForParent(SUBJECT, 999L)).thenReturn(Optional.empty());
+
+        mockMvc.perform(delete(getStudentUri(999L)).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT"))))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void deactivatingAnotherParentsStudentReturnsNotFound() throws Exception {
+        when(studentService.deactivateForParent(OTHER_SUBJECT, 1L)).thenReturn(Optional.empty());
+
+        mockMvc.perform(delete(getStudentUri(1L)).with(jwt()
+                        .jwt(builder -> builder.subject(OTHER_SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT"))))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void missingFutureMindsParentAccountReturnsNotFoundWhenDeactivatingAStudent() throws Exception {
+        when(studentService.deactivateForParent(SUBJECT, 1L)).thenReturn(Optional.empty());
+
+        mockMvc.perform(delete(getStudentUri(1L)).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT"))))
+                .andExpect(status().isNotFound());
+    }
+
+    // --- inactive student excluded from normal active APIs (EP-06.9) ---
+
+    @Test
+    void getOneReturnsNotFoundForADeactivatedOwnStudent() throws Exception {
+        when(studentService.findOneForParent(SUBJECT, 1L)).thenReturn(Optional.empty());
+
+        mockMvc.perform(get(getStudentUri(1L)).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT"))))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void patchReturnsNotFoundForADeactivatedOwnStudent() throws Exception {
+        when(studentService.updateForParent(eq(SUBJECT), eq(1L), any(), any(), any()))
+                .thenReturn(Optional.empty());
+
+        mockMvc.perform(patch(getStudentUri(1L)).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(updateBody("Priya", null, null)))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void listExcludesADeactivatedStudent() throws Exception {
+        Student active = student(1L, "Aarav", SchoolYear.YEAR_5, PreparationGoal.SELECTIVE_MATHEMATICS);
+        when(studentService.findAllForParent(SUBJECT)).thenReturn(Optional.of(List.of(active)));
+
+        mockMvc.perform(get(GET_STUDENTS_URI).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].id").value(1));
+    }
+
+    // --- duplicate rule is unchanged by deactivation (EP-06.9 accepted MVP limitation) ---
+
+    @Test
+    void creatingADuplicateMatchingADeactivatedStudentStillReturnsConflict() throws Exception {
+        when(studentService.create(eq(SUBJECT), eq("Aarav"), eq("YEAR_5"), eq("SELECTIVE_MATHEMATICS")))
+                .thenThrow(new ResponseStatusException(HttpStatus.CONFLICT,
+                        "A student with this name, school year and preparation goal already exists for this parent."));
+
+        mockMvc.perform(post(POST_STUDENTS_URI).with(jwt()
+                        .jwt(builder -> builder.subject(SUBJECT))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PARENT")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validBody()))
                 .andExpect(status().isConflict());
     }
 
