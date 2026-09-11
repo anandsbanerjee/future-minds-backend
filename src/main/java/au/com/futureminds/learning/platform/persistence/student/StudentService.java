@@ -74,6 +74,22 @@ public class StudentService {
                 .map(account -> studentRepository.findByParentAccountIdOrderByIdAsc(account.getId()));
     }
 
+    /**
+     * Read-only lookup of a single student belonging to the authenticated
+     * parent. Ownership is enforced by the repository query itself -
+     * findByIdAndParentAccountId requires both the requested studentId and
+     * the resolved internal parentAccountId to match in the same query -
+     * never by fetching-then-checking, so a student belonging to another
+     * parent is indistinguishable from a non-existent one. Empty Optional
+     * covers all three cases the controller maps to 404: no Future Minds
+     * parent account for the subject, no such student, or a student owned by
+     * a different parent.
+     */
+    public Optional<Student> findOneForParent(String externalSubject, Long studentId) {
+        return parentAccountService.findByExternalSubject(externalSubject)
+                .flatMap(account -> studentRepository.findByIdAndParentAccountId(studentId, account.getId()));
+    }
+
     private ResponseStatusException duplicateStudentException() {
         return new ResponseStatusException(HttpStatus.CONFLICT,
                 "A student with this name, school year and preparation goal already exists for this parent.");

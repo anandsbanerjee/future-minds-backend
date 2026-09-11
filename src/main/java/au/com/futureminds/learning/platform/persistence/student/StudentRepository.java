@@ -3,6 +3,7 @@ package au.com.futureminds.learning.platform.persistence.student;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;
+import java.util.Optional;
 
 public interface StudentRepository extends JpaRepository<Student, Long> {
 
@@ -10,4 +11,6 @@ public interface StudentRepository extends JpaRepository<Student, Long> {
             Long parentAccountId, String firstName, SchoolYear schoolYear, PreparationGoal preparationGoal);
 
     List<Student> findByParentAccountIdOrderByIdAsc(Long parentAccountId);
+
+    Optional<Student> findByIdAndParentAccountId(Long id, Long parentAccountId);
 }
