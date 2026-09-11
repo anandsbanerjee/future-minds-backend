@@ -10,6 +10,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
 import java.time.LocalDateTime;
+import java.util.Objects;
 
 @Entity
 @Table(name = "student")
@@ -47,6 +48,35 @@ public class Student {
         this.firstName = firstName;
         this.schoolYear = schoolYear;
         this.preparationGoal = preparationGoal;
+    }
+
+    /**
+     * Application-owned profile edit, entirely separate from ownership/system
+     * fields (id, parentAccountId, createdAt, updatedAt), which have no
+     * mutator by design - see StudentService.updateForParent.
+     */
+    public boolean updateFirstName(String firstName) {
+        if (Objects.equals(this.firstName, firstName)) {
+            return false;
+        }
+        this.firstName = firstName;
+        return true;
+    }
+
+    public boolean updateSchoolYear(SchoolYear schoolYear) {
+        if (Objects.equals(this.schoolYear, schoolYear)) {
+            return false;
+        }
+        this.schoolYear = schoolYear;
+        return true;
+    }
+
+    public boolean updatePreparationGoal(PreparationGoal preparationGoal) {
+        if (Objects.equals(this.preparationGoal, preparationGoal)) {
+            return false;
+        }
+        this.preparationGoal = preparationGoal;
+        return true;
     }
 
     public Long getId() {
